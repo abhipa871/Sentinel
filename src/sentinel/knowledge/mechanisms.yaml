@@ -1,0 +1,46 @@
+# Curated causal templates inspired by CWE-862 / CWE-863 / CWE-1427.
+# These are hypotheses, not vulnerability signatures or CVE matches.
+rules:
+  unauthorized_refund: {op: OR, children: [refund_agent_route, refund_identity_route]}
+  refund_agent_route: {op: AND, children: [agent_compromised, tool_callable, privileged_authority, {op: NOT, children: [independent_authorization]}]}
+  refund_identity_route: {op: AND, children: [identity_compromised, privileged_authority, {op: NOT, children: [independent_authorization]}]}
+  unauthorized_agent_tool_action: {op: OR, children: [refund_agent_route, refund_identity_route]}
+  sensitive_data_exposure: {op: OR, children: [data_agent_route, data_identity_route]}
+  data_agent_route: {op: AND, children: [agent_compromised, data_access, untrusted_sink, {op: NOT, children: [independent_authorization]}]}
+  data_identity_route: {op: AND, children: [identity_compromised, data_access, untrusted_sink, {op: NOT, children: [independent_authorization]}]}
+conditions:
+  agent_compromised:
+    description: Hypothetical agent compromise or untrusted instructions successfully influence its actions
+    binding: agent
+    mechanism_id: CWE-1427
+    analyzer: inspect_agent_tools
+  tool_callable:
+    description: Agent declares access to the relevant tool
+    binding: tool
+    mechanism_id: CWE-862
+    analyzer: inspect_agent_tools
+  privileged_authority:
+    description: Deployed service identity has authority to perform the target action
+    binding: identity
+    mechanism_id: CWE-863
+    analyzer: inspect_source
+  independent_authorization:
+    description: Independent backend authorization effectively blocks unauthorized requests
+    binding: backend
+    mechanism_id: CWE-862
+    analyzer: inspect_auth
+  identity_compromised:
+    description: Hypothetical compromise of the payment or data service identity
+    binding: identity
+    mechanism_id: CWE-863
+    analyzer: inspect_source
+  data_access:
+    description: Runtime principal can access sensitive records
+    binding: datastore
+    mechanism_id: CWE-200
+    analyzer: inspect_source
+  untrusted_sink:
+    description: Sensitive data reaches an untrusted recipient
+    binding: agent
+    mechanism_id: CWE-200
+    analyzer: inspect_agent_tools
