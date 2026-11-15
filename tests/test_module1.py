@@ -68,3 +68,73 @@ def test_agent_selects_final_module_one_candidates(sample_graph):
     assert rows[0].derivation_kind == "agent_inference"
     assert rows[0].candidate_status == "potential"
     assert "agent.module1.discovery.v1" in rows[0].rule_ids
+
+
+def test_polyglot_rules_emit_leads_from_syntax_facts_only(tmp_path):
+    from sentinel.phase0 import RepositoryExtractor
+    from tests.test_phase0 import POLYGLOT_REPO, _write
+
+    _write(
+        tmp_path,
+        {
+            **POLYGLOT_REPO,
+            "svc/crapi/shop/serializers.py": "class S:\n    class Meta:\n        fields = '__all__'\n",
+            "svc/crapi/shop/auth.py": (
+                "import jwt\njwt.decode(t, options={'verify_signature': False})\n"
+            ),
+            "svc/crapi/empty.py": "",
+        },
+    )
+    graph = RepositoryExtractor().extract(tmp_path)
+    leads = ModuleOne().run(graph, curated_mvp_knowledge(), max_candidates=1_000)
+    found = {(lead.node, lead.vulnerability_id) for lead in leads}
+    assert ("id/src/main/java/com/x/Ctl.java", "CWE-639") in found  # {carId} route parameter
+    assert ("id/src/main/java/com/x/Ctl.java", "CWE-862") in found
+    assert ("id/src/main/java/com/x/Ctl.java", "CWE-918") in found  # getForObject
+    assert ("go/api/router/routes.go", "CWE-943") in found  # bson.M query document
+    assert ("go/api/router/routes.go", "CWE-295") in found  # InsecureSkipVerify
+    assert ("svc/crapi/shop/serializers.py", "CWE-915") in found  # fields = "__all__"
+    assert ("svc/crapi/shop/auth.py", "CWE-347") in found
+    assert ("svc/crapi/shop/urls.py", "CWE-639") in found  # (?P<order_id>...)
+    # Empty and feature-free files produce no leads, and no predicate is left "unknown".
+    assert not any(lead.node == "svc/crapi/empty.py" for lead in leads)
+    assert not any(
+        "required feature evidence is incomplete" in lead.coverage_warnings for lead in leads
+    )
+    assert all(lead.candidate_status == "potential" for lead in leads)
+
+
+def test_rule_dsl_nonempty_and_string_literal_predicates(sample_graph):
+    from sentinel.contracts import ApplicabilityRule, AssetType
+
+    asset = next(item for item in sample_graph.assets if item.path == "api/routes.py")
+
+    def rule(required):
+        return ApplicabilityRule(
+            rule_id="rule.test.v1",
+            vulnerability_id="CWE-639",
+            vulnerability_name="test",
+            rule_version=1,
+            applicable_asset_types=(AssetType.SOURCE_FILE,),
+            required_features=required,
+            derivation_kind="curated_derived",
+            source_refs=("test",),
+        )
+
+    assert evaluate_rule(asset, rule({"any_string_literals": ("/load",)})).result == "match"
+    assert evaluate_rule(asset, rule({"any_string_literals": ("__all__",)})).result == "no_match"
+    assert evaluate_rule(asset, rule({"nonempty": ("route_paths",)})).result == "match"
+    assert evaluate_rule(asset, rule({"nonempty": ("route_params",)})).result == "no_match"
+    assert evaluate_rule(asset, rule({"nonempty": ("never_extracted",)})).result == "unknown"
+
+
+def test_candidate_enrichment_lists_owasp_api_risks_explicitly():
+    from sentinel.knowledge_graph import KnowledgeGraphIndex
+    from sentinel.module1 import _knowledge_context
+
+    index = KnowledgeGraphIndex(load_predefined_graph())
+    context = _knowledge_context("CWE-639", index)
+    assert [risk["entity_id"] for risk in context["owasp_api_risks"]] == ["OWASP-API:API1:2023"]
+    direct = _knowledge_context("OWASP-API:API6:2023", index)
+    assert direct["entity_type"] == "OWASP_API_RISK"
+    assert direct["owasp_api_risks"][0]["raw_id"] == "API6:2023"

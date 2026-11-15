@@ -44,7 +44,8 @@ class ScanRequest(BaseModel):
     ref: str = "HEAD"
     scan_profile: Literal["fast", "balanced", "deep"] = "balanced"
     allow_sandbox_tests: bool = False
-    max_candidates: int = Field(default=500, ge=1, le=10_000)
+    # Defaults to the scan profile's candidate budget.
+    max_candidates: int | None = Field(default=None, ge=1, le=10_000)
     requested_modules: tuple[Literal["phase0", "module1", "module2", "module3"], ...] = (
         "phase0",
         "module1",
@@ -99,6 +100,7 @@ def create_app(
                 ref=request.ref,
                 through=through,
                 max_candidates=request.max_candidates,
+                profile=request.scan_profile,
             )
             store.complete(scan_id, bundle)
         except Exception as exc:

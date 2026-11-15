@@ -34,6 +34,100 @@ def test_openai_models_disable_reasoning_for_chat_completion_tools(monkeypatch):
     assert "use_responses_api" not in captured
 
 
+class _StopAtModelCall(Exception):
+    pass
+
+
+def _tools_bound_to_model(agent, monkeypatch) -> set[str]:
+    """Invoke an agent until its first model call and return the tool names offered to it."""
+    from langchain_openai import ChatOpenAI
+
+    captured: set[str] = set()
+
+    def bind_tools(self, tools, **_):
+        from langchain_core.runnables import RunnableLambda
+
+        for item in tools:
+            captured.add(getattr(item, "name", None) or item.get("function", {}).get("name"))
+
+        def stop(_):
+            raise _StopAtModelCall
+
+        return RunnableLambda(stop)
+
+    monkeypatch.setattr(ChatOpenAI, "bind_tools", bind_tools)
+    with pytest.raises(_StopAtModelCall):
+        agent.invoke({"messages": [{"role": "user", "content": "hi"}]})
+    return captured
+
+
+@pytest.mark.parametrize(
+    ("model_id", "effort", "expected"),
+    [
+        ("openai:gpt-5.6-luna", "auto", "none"),
+        ("openai:gpt-5.6-luna", "provider-default", None),
+        ("openai:gpt-5.6-luna", "low", "low"),
+        ("moonshot:kimi-k3", "auto", None),
+        ("moonshot:kimi-k3", "medium", "medium"),
+    ],
+)
+def test_reasoning_effort_is_explicit(model_id, effort, expected, monkeypatch):
+    captured = {}
+
+    def fake_init_chat_model(model_name, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "test-only")
+    monkeypatch.setattr("langchain.chat_models.init_chat_model", fake_init_chat_model)
+    runtime = object.__new__(DeepAgentsRuntime)
+    runtime.max_provider_retries = 1
+    runtime.provider_timeout_seconds = 10
+    runtime.reasoning_effort = effort
+    runtime._model_client(model_id)
+    assert captured.get("reasoning_effort") == expected
+    assert runtime._cache_identity() == ({} if effort == "auto" else {"reasoning_effort": effort})
+
+
+def test_openai_compatible_provider_is_routed_and_stays_tool_locked(sample_graph, monkeypatch):
+    from deepagents import create_deep_agent
+    from langchain_openai import ChatOpenAI
+
+    from sentinel.agents.runtime import FILESYSTEM_TOOLS
+
+    monkeypatch.setenv("MOONSHOT_API_KEY", "test-only-not-a-real-secret")
+    monkeypatch.delenv("MOONSHOT_BASE_URL", raising=False)
+    runtime = DeepAgentsRuntime("moonshot:kimi-k3")
+    client = runtime.supervisor_client
+    assert client.model_name == "kimi-k3"
+    assert str(client.openai_api_base) == "https://api.moonshot.ai/v1"
+    # The client reports itself as openai:kimi-k3; that key must carry the locked profile too.
+    assert runtime._resolved_profile_key(client) == "openai:kimi-k3"
+    toolbox = EvidenceToolbox(sample_graph)
+    typed = runtime._typed_agent(
+        model=client,
+        tools=runtime._tools([toolbox.read_evidence]),
+        system_prompt="x",
+        response_format=SecurityReviewProposal,
+    )
+    supervisor = runtime._agent(
+        toolbox=toolbox, response_format=SecurityReviewProposal, planning=False
+    )
+    for agent in (typed, supervisor):
+        offered = _tools_bound_to_model(agent, monkeypatch)
+        assert offered, "the model must be offered the typed-response and evidence tools"
+        assert not offered & FILESYSTEM_TOOLS, offered & FILESYSTEM_TOOLS
+    # Negative control: a client whose resolved key has no locked profile does see them.
+    unlocked = ChatOpenAI(
+        model="unregistered-model", api_key="test-only", base_url="https://example.invalid/v1"
+    )
+    leaked = _tools_bound_to_model(
+        create_deep_agent(model=unlocked, tools=[], system_prompt="x"), monkeypatch
+    )
+    assert {"ls", "write_file", "edit_file", "delete"} <= leaked
+
+
 def test_deepagents_factory_builds_locked_compiled_graph(sample_graph):
     runtime = DeepAgentsRuntime("google_genai:gemini-2.5-flash")
     agent = runtime._agent(
@@ -42,10 +136,14 @@ def test_deepagents_factory_builds_locked_compiled_graph(sample_graph):
         planning=False,
     )
     assert type(agent).__name__ == "CompiledStateGraph"
-    module_one_agent = runtime._module_one_agent(EvidenceToolbox(sample_graph))
-    graph_agent = runtime._repository_graph_agent(EvidenceToolbox(sample_graph))
-    assert type(module_one_agent).__name__ == "CompiledStateGraph"
-    assert type(graph_agent).__name__ == "CompiledStateGraph"
+    toolbox = EvidenceToolbox(sample_graph, load_predefined_graph())
+    profile = runtime.profile
+    assert type(runtime._module_one_synthesis_agent(toolbox, profile, "m1")).__name__ == (
+        "CompiledStateGraph"
+    )
+    assert type(runtime._repository_graph_synthesis_agent(toolbox, profile, "g")).__name__ == (
+        "CompiledStateGraph"
+    )
     assert len(runtime._skill_files()) == 12
 
 
@@ -195,7 +293,9 @@ def test_security_review_is_canonicalized_and_provenance_is_observed(sample_grap
 def test_module_one_contract_flags_verdict_wording_and_unrelated_assets(sample_graph):
     toolbox = EvidenceToolbox(sample_graph, load_predefined_graph())
     loader = next(asset for asset in sample_graph.assets if asset.path == "services/loader.py")
-    unrelated = next(asset for asset in sample_graph.assets if asset.path == "pyproject.toml")
+    # Reachable from loader.py only back through the shared pyproject.toml hub, which graph walks
+    # do not follow, so it is not a graph neighbor.
+    unrelated = next(asset for asset in sample_graph.assets if asset.path == "api/__init__.py")
     output = ModuleOneAgentOutput(
         candidates=(
             ModuleOneCandidateProposal(

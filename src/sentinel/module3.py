@@ -17,6 +17,7 @@ from sentinel.contracts import (
     RepositoryAssetGraph,
     VerificationStatus,
 )
+from sentinel.profiles import ScanProfile
 
 
 class InvalidPlanningProposal(ValueError):
@@ -206,6 +207,7 @@ class ModuleThree:
         graph: RepositoryAssetGraph,
         *,
         decisions: Mapping[UUID, ProposalDecision] | None = None,
+        profile: ScanProfile | None = None,
     ) -> tuple[PlanningProposal, OptimizationResult]:
         eligible = [
             finding
@@ -227,6 +229,6 @@ class ModuleThree:
                 assumptions=(),
             )
             return planning, self.optimizer.optimize(planning, decisions=decisions)
-        planning = self.runtime.synthesize_plan(findings, graph)
+        planning = self.runtime.synthesize_plan(findings, graph, profile=profile)
         validate_planning_proposal(planning, findings, graph)
         return planning, self.optimizer.optimize(planning, decisions=decisions)

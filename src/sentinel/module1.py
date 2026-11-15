@@ -5,10 +5,16 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from sentinel.agents.runtime import MODULE_ONE_FORBIDDEN_VERDICT, SemanticRuntime
+from sentinel.agents.runtime import (
+    MODULE_ONE_FORBIDDEN_VERDICT,
+    ContractRepairFailed,
+    SemanticRuntime,
+)
 from sentinel.contracts import (
     ApplicabilityRule,
     Asset,
+    CoverageChecklistItem,
+    EdgeType,
     KnowledgeGraphSnapshot,
     KnowledgeSnapshot,
     ModuleOneAgentOutput,
@@ -17,6 +23,9 @@ from sentinel.contracts import (
     RepositoryAssetGraph,
 )
 from sentinel.knowledge_graph import KnowledgeGraphIndex
+from sentinel.partitions import Partition
+from sentinel.profiles import ScanProfile
+from sentinel.telemetry import emit, parallel_map
 
 
 @dataclass(frozen=True)
@@ -45,12 +54,21 @@ def evaluate_rule(asset: Asset, rule: ApplicabilityRule) -> PredicateResult:
         }
         if not matches:
             return PredicateResult("no_match", (), ())
+    if expected_literals := required.get("any_string_literals"):
+        literals = {str(value) for value in asset.features.get("string_literals", [])}
+        if not literals & set(expected_literals):
+            return PredicateResult("no_match", (), ())
     if expected_values := required.get("equals"):
         for key, expected in expected_values.items():
             if key not in asset.features:
                 return PredicateResult("unknown", asset.evidence_refs, (f"feature:{key}",))
             if asset.features[key] != expected:
                 return PredicateResult("no_match", (), ())
+    for key in required.get("nonempty", ()):
+        if key not in asset.features:
+            return PredicateResult("unknown", asset.evidence_refs, (f"feature:{key}",))
+        if not asset.features[key]:
+            return PredicateResult("no_match", (), ())
     excluded = rule.excluded_features.get("any_api_symbols", ())
     if any(symbol in symbols for symbol in excluded):
         return PredicateResult("no_match", (), ())
@@ -69,11 +87,18 @@ def _context(
 ) -> tuple[RelatedAsset, ...]:
     assets = {item.asset_id: item for item in graph.assets}
     adjacency: dict[str, list[tuple[str, str, tuple[str, ...]]]] = {}
+    # A manifest is a hub shared by every file of its project. Walking back out of it would make
+    # all of those files look related, so reverse manifest edges are only followed from the
+    # starting asset itself (when the anchor is the manifest).
+    manifest_dependents: dict[str, list[tuple[str, str, tuple[str, ...]]]] = {}
     for edge in graph.edges:
         adjacency.setdefault(edge.source_asset_id, []).append(
             (edge.target_asset_id, edge.edge_type.value, edge.evidence_refs)
         )
-        adjacency.setdefault(edge.target_asset_id, []).append(
+        reverse = (
+            manifest_dependents if edge.edge_type is EdgeType.DEPENDS_ON_MANIFEST else adjacency
+        )
+        reverse.setdefault(edge.target_asset_id, []).append(
             (edge.source_asset_id, edge.edge_type.value, edge.evidence_refs)
         )
     queue = deque([(asset.asset_id, 0)])
@@ -84,7 +109,10 @@ def _context(
         if distance >= depth:
             continue
         grouped: dict[str, tuple[set[str], set[str]]] = {}
-        for target, edge_type, refs in adjacency.get(current, []):
+        neighbors = adjacency.get(current, [])
+        if current == asset.asset_id:
+            neighbors = neighbors + manifest_dependents.get(current, [])
+        for target, edge_type, refs in neighbors:
             edge_types, evidence = grouped.setdefault(target, (set(), set()))
             edge_types.add(edge_type)
             evidence.update(refs)
@@ -167,6 +195,12 @@ def _knowledge_context(vulnerability_id: str, index: KnowledgeGraphIndex | None)
         "source_system": entity.source_system,
         "source_version": entity.source_version,
         "relationships": relationships,
+        # Listed explicitly: the bounded neighborhood above is sorted by relation type and can
+        # truncate these official OWASP references for well-connected CWEs.
+        "owasp_api_risks": [
+            {"entity_id": risk.entity_id, "raw_id": risk.raw_id, "name": risk.name}
+            for risk in index.owasp_api_risks(vulnerability_id)
+        ],
     }
 
 
@@ -268,6 +302,8 @@ class AgenticModuleOne:
         if not runtime.is_deepagents:
             raise TypeError("agentic Module I requires a LangChain Deep Agents runtime")
         self.runtime = runtime
+        # Per-partition OWASP API Top 10 examination record of the last run (coverage only).
+        self.coverage_checklist: tuple[CoverageChecklistItem, ...] = ()
 
     def run(
         self,
@@ -276,6 +312,8 @@ class AgenticModuleOne:
         vulnerability_graph: KnowledgeGraphSnapshot,
         *,
         max_candidates: int = 500,
+        partitions: tuple[Partition, ...] | None = None,
+        profile: ScanProfile | None = None,
     ) -> tuple[PotentialVulnerabilityRow, ...]:
         lead_limit = max(100, max_candidates * 2)
         leads = ModuleOne().run(
@@ -283,13 +321,41 @@ class AgenticModuleOne:
             knowledge,
             vulnerability_graph=vulnerability_graph,
             max_candidates=lead_limit,
+            graph_depth=profile.graph_hop_depth if profile else 2,
         )
-        output = self.runtime.discover_candidates(
-            leads,
-            graph,
-            vulnerability_graph,
-            max_candidates=max_candidates,
-        )
+        if not partitions:
+            output = self.runtime.discover_candidates(
+                leads,
+                graph,
+                vulnerability_graph,
+                max_candidates=max_candidates,
+                profile=profile,
+            )
+        else:
+            outputs = tuple(
+                parallel_map(
+                    lambda partition: self._discover_or_fail_closed(
+                        leads, graph, vulnerability_graph, max_candidates, partition, profile
+                    ),
+                    partitions,
+                    profile.partition_concurrency if profile else 1,
+                )
+            )
+            output = self.merge(outputs, tuple(item.partition_id for item in partitions))
+        ranked = sorted(output.candidates, key=lambda item: -item.investigation_priority)
+        if len(ranked) > max_candidates:
+            # Budget policy: the remainder is queued, never treated as reviewed or safe.
+            output = output.model_copy(
+                update={
+                    "coverage_warnings": (
+                        *output.coverage_warnings,
+                        f"{len(ranked) - max_candidates} lower-priority agent candidates exceeded "
+                        f"the {max_candidates}-candidate budget and were queued, not reviewed",
+                    )
+                }
+            )
+        output = output.model_copy(update={"candidates": tuple(ranked[:max_candidates])})
+        self.coverage_checklist = output.coverage_checklist
         return self._materialize(
             output,
             leads,
@@ -297,6 +363,86 @@ class AgenticModuleOne:
             knowledge,
             vulnerability_graph,
             max_candidates=max_candidates,
+        )
+
+    def _discover_or_fail_closed(
+        self,
+        leads: tuple[PotentialVulnerabilityRow, ...],
+        graph: RepositoryAssetGraph,
+        vulnerability_graph: KnowledgeGraphSnapshot,
+        max_candidates: int,
+        partition: Partition,
+        profile: ScanProfile | None,
+    ) -> ModuleOneAgentOutput:
+        """One partition's discovery; an unrecoverable contract failure fails closed for it only."""
+        try:
+            return self.runtime.discover_candidates(
+                leads,
+                graph,
+                vulnerability_graph,
+                max_candidates=max_candidates,
+                focus=partition,
+                profile=profile,
+            )
+        except ContractRepairFailed as exc:
+            emit("partition_failed_closed", f"module1[{partition.partition_id}]", str(exc))
+            risks = sorted(
+                (
+                    item
+                    for item in vulnerability_graph.entities
+                    if item.entity_type == "OWASP_API_RISK"
+                ),
+                key=lambda item: int(item.metadata.get("rank", 0) or 0),
+            )
+            return ModuleOneAgentOutput(
+                candidates=(),
+                analyzed_asset_ids=(),
+                coverage_warnings=(
+                    f"partition not analyzed: its Module I output failed contract validation "
+                    f"after repair and salvage ({exc}); absence of candidates here is not evidence "
+                    "of safety",
+                ),
+                summary="Partition not analyzed (failed closed).",
+                # No specialist provenance is claimed for a partition that produced no output.
+                specialist_reviews=(),
+                coverage_checklist=tuple(
+                    CoverageChecklistItem(
+                        entity_id=risk.entity_id,
+                        status="not_examined",
+                        note="Partition failed closed; not examined.",
+                        partition_id=partition.partition_id,
+                    )
+                    for risk in risks
+                ),
+            )
+
+    @staticmethod
+    def merge(
+        outputs: tuple[ModuleOneAgentOutput, ...], partition_ids: tuple[str, ...]
+    ) -> ModuleOneAgentOutput:
+        """Combine per-partition outputs; dedup and validation happen in _materialize."""
+        labeled = tuple(zip(partition_ids, outputs, strict=True))
+        return ModuleOneAgentOutput(
+            candidates=tuple(item for output in outputs for item in output.candidates),
+            analyzed_asset_ids=tuple(
+                dict.fromkeys(item for output in outputs for item in output.analyzed_asset_ids)
+            ),
+            coverage_warnings=tuple(
+                dict.fromkeys(
+                    f"[{partition_id}] {warning}"
+                    for partition_id, output in labeled
+                    for warning in output.coverage_warnings
+                )
+            ),
+            summary=" ".join(
+                f"[{partition_id}] {output.summary}" for partition_id, output in labeled
+            ),
+            specialist_reviews=tuple(
+                dict.fromkeys(item for output in outputs for item in output.specialist_reviews)
+            ),
+            coverage_checklist=tuple(
+                item for output in outputs for item in output.coverage_checklist
+            ),
         )
 
     @staticmethod

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,8 +15,19 @@ from defusedxml import ElementTree
 from sentinel.contracts import KnowledgeEntity, KnowledgeGraphSnapshot, KnowledgeRelation
 from sentinel.phase0 import NAMESPACE
 
-PARSER_VERSION = "sentinel-gv-etl-v2"
-CatalogName = Literal["cwe", "capec", "atlas", "d3fend"]
+PARSER_VERSION = "sentinel-gv-etl-v3"
+CatalogName = Literal["cwe", "capec", "atlas", "d3fend", "owasp_api"]
+
+OWASP_API_SYSTEM = "OWASP API Security Top 10"
+_OWASP_API_TITLE = re.compile(r"\A# (API(\d{1,2}):(\d{4})) ([^\r\n]+?)\s*$", re.MULTILINE)
+_OWASP_API_RATING = re.compile(
+    r"(Exploitability|Prevalence|Detectability|Technical)\s+\*\*([^*\r\n]+)\*\*"
+)
+# `[CWE-285: Improper Authorization][3]`; labels may wrap across lines.
+_OWASP_API_CWE_LABEL = re.compile(r"\[CWE-(\d+)\b[^\]]*\]")
+_OWASP_API_CWE_LINK = re.compile(
+    r"(?m)^\[\d+\]:\s*https?://cwe\.mitre\.org/data/definitions/(\d+)\.html\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -98,7 +110,9 @@ def parse_cwe(artifact: CatalogArtifact) -> tuple[list[KnowledgeEntity], list[Kn
         "PeerOf": "PEER_OF",
         "MemberOf": "MEMBER_OF",
     }
-    for kind in ("Weakness", "View"):
+    # CWE 5.0 publishes former categories (e.g. "OWASP Top Ten 2021 Category A01:2021") as
+    # Grouping records. They carry a Summary and Has_Member relationships scoped to a view.
+    for kind in ("Weakness", "Grouping", "View"):
         for item in root.findall(f".//{{*}}{kind}"):
             raw_id = item.attrib.get("ID")
             if not raw_id:
@@ -110,7 +124,8 @@ def parse_cwe(artifact: CatalogArtifact) -> tuple[list[KnowledgeEntity], list[Kn
                     entity_type="CWE",
                     name=item.attrib.get("Name", entity_id),
                     description=_text(item.find("{*}Description"))
-                    or _text(item.find("{*}Objective")),
+                    or _text(item.find("{*}Objective"))
+                    or _text(item.find("{*}Summary")),
                     raw_id=raw_id,
                     status=item.attrib.get("Status"),
                     metadata=_metadata(
@@ -122,7 +137,7 @@ def parse_cwe(artifact: CatalogArtifact) -> tuple[list[KnowledgeEntity], list[Kn
                     source_version=artifact.version,
                 )
             )
-            if kind == "View":
+            if kind in {"Grouping", "View"}:
                 for member in item.findall(".//{*}Has_Member"):
                     if target := member.attrib.get("CWE_ID"):
                         relations.append(
@@ -131,6 +146,11 @@ def parse_cwe(artifact: CatalogArtifact) -> tuple[list[KnowledgeEntity], list[Kn
                                 relation_type="MEMBER_OF",
                                 target_id=entity_id,
                                 source_ref=raw_id,
+                                metadata=(
+                                    _metadata(view_id=member.attrib.get("View_ID"))
+                                    if kind == "Grouping"
+                                    else {}
+                                ),
                                 source_system="MITRE CWE",
                                 source_version=artifact.version,
                             )
@@ -424,16 +444,112 @@ def parse_d3fend(
     return entities, relations
 
 
+def _markdown_section(text: str, heading: str) -> str:
+    """Return the body of a level-2 Markdown section, up to the next level-2 heading."""
+    match = re.search(rf"(?m)^## {re.escape(heading)}[ \t]*$", text)
+    if match is None:
+        return ""
+    following = re.search(r"(?m)^## ", text[match.end() :])
+    end = match.end() + following.start() if following else len(text)
+    return text[match.end() : end]
+
+
+def parse_owasp_api(
+    artifact: CatalogArtifact,
+) -> tuple[list[KnowledgeEntity], list[KnowledgeRelation]]:
+    """Parse the OWASP API Security Top 10 edition bundle.
+
+    The artifact is a JSON bundle ``{"repository", "commit", "path", "files": {name: markdown}}``
+    built from one pinned commit of github.com/OWASP/API-Security. Only CWE references that OWASP
+    publishes under each risk's References section become edges; none are inferred.
+    """
+    bundle = json.loads(artifact.content)
+    files = bundle.get("files") if isinstance(bundle, dict) else None
+    if not isinstance(files, dict) or not files:
+        raise ValueError("OWASP API bundle must contain a non-empty files mapping")
+    entities: list[KnowledgeEntity] = []
+    relations: list[KnowledgeRelation] = []
+    ranks: list[int] = []
+    editions: set[str] = set()
+    for name, raw_text in sorted(files.items()):
+        if not isinstance(raw_text, str):
+            raise ValueError(f"OWASP API file {name!r} is not text")
+        text = raw_text.lstrip("﻿")
+        title = _OWASP_API_TITLE.search(text)
+        if title is None:
+            raise ValueError(f"OWASP API file {name!r} has no 'APIn:YYYY' title")
+        raw_id, rank, edition, risk_name = (
+            title.group(1),
+            int(title.group(2)),
+            title.group(3),
+            title.group(4),
+        )
+        references = _markdown_section(text, "References")
+        labels = [int(value) for value in _OWASP_API_CWE_LABEL.findall(references)]
+        links = [int(value) for value in _OWASP_API_CWE_LINK.findall(references)]
+        if sorted(set(labels)) != sorted(set(links)):
+            raise ValueError(
+                f"OWASP API {raw_id} CWE labels {sorted(set(labels))} disagree with link "
+                f"targets {sorted(set(links))}"
+            )
+        ratings = {key.casefold(): value.strip() for key, value in _OWASP_API_RATING.findall(text)}
+        description = " ".join(_markdown_section(text, "Is the API Vulnerable?").split())
+        entity_id = f"OWASP-API:{raw_id}"
+        entities.append(
+            KnowledgeEntity(
+                entity_id=entity_id,
+                entity_type="OWASP_API_RISK",
+                name=risk_name,
+                description=description[:4_000] or None,
+                raw_id=raw_id,
+                aliases=(raw_id, f"{raw_id} {risk_name}"),
+                metadata=_metadata(
+                    rank=rank,
+                    edition=edition,
+                    source_file=name,
+                    exploitability=ratings.get("exploitability"),
+                    prevalence=ratings.get("prevalence"),
+                    detectability=ratings.get("detectability"),
+                    technical_impact=ratings.get("technical"),
+                ),
+                source_system=OWASP_API_SYSTEM,
+                source_version=artifact.version,
+            )
+        )
+        for cwe_id in sorted(set(labels)):
+            relations.append(
+                KnowledgeRelation(
+                    source_id=entity_id,
+                    relation_type="REFERENCES_WEAKNESS",
+                    target_id=f"CWE-{cwe_id}",
+                    source_ref=name,
+                    source_system=OWASP_API_SYSTEM,
+                    source_version=artifact.version,
+                )
+            )
+        ranks.append(rank)
+        editions.add(edition)
+    if sorted(ranks) != list(range(1, 11)):
+        raise ValueError(f"OWASP API Top 10 must contain ranks 1-10 exactly once; got {ranks}")
+    if editions != {artifact.version}:
+        raise ValueError(
+            f"OWASP API edition {sorted(editions)} does not match artifact {artifact.version}"
+        )
+    return entities, relations
+
+
 def graph_digest(
     entities: tuple[KnowledgeEntity, ...],
     relations: tuple[KnowledgeRelation, ...],
     manifest: dict[str, str],
+    parser_version: str = PARSER_VERSION,
 ) -> str:
+    """Digest a snapshot. Verification must pass the parser version the snapshot records."""
     material = {
         "entities": [entity.model_dump(mode="json") for entity in entities],
         "relations": [relation.model_dump(mode="json") for relation in relations],
         "manifest": manifest,
-        "parser_version": PARSER_VERSION,
+        "parser_version": parser_version,
     }
     return hashlib.sha256(
         json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
@@ -447,6 +563,7 @@ class KnowledgeEtl:
             "capec": parse_capec,
             "atlas": parse_atlas,
             "d3fend": parse_d3fend,
+            "owasp_api": parse_owasp_api,
         }
         entities: dict[str, KnowledgeEntity] = {}
         relations: list[KnowledgeRelation] = []

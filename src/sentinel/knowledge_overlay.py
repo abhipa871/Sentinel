@@ -152,7 +152,7 @@ def extend_with_targeted_cves(
             f"{source_url}#sha256={hashlib.sha256(serialized_records).hexdigest()}"
         ),
     }
-    digest = graph_digest(entity_rows, relation_rows, manifest)
+    digest = graph_digest(entity_rows, relation_rows, manifest, base.parser_version)
     entity_counts = Counter(row.entity_type for row in entity_rows)
     relation_counts = Counter(row.relation_type for row in relation_rows)
     return KnowledgeGraphSnapshot(

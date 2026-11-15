@@ -25,6 +25,7 @@ KnowledgeEntityType = Literal[
     "PRODUCT",
     "PACKAGE",
     "DEFENSIVE_TECHNIQUE",
+    "OWASP_API_RISK",
 ]
 
 
@@ -196,6 +197,11 @@ class RepositoryGraphSpecialistReview(FrozenModel):
     unknown_conditions: tuple[str, ...]
 
 
+class RepositoryGraphHintRejection(FrozenModel):
+    hint_ref: str
+    reason: str
+
+
 class RepositoryGraphAgentOutput(FrozenModel):
     asset_annotations: tuple[RepositoryGraphAssetAnnotation, ...]
     edges: tuple[RepositoryGraphEdgeProposal, ...]
@@ -204,6 +210,10 @@ class RepositoryGraphAgentOutput(FrozenModel):
     coverage_warnings: tuple[str, ...]
     summary: str
     specialist_reviews: tuple[str, ...]
+    # Parser edge hints the agent adjudicated by handle. Accepted hints are materialized with
+    # their original observed evidence and location; the agent does not retype them.
+    accepted_hint_refs: tuple[str, ...] = ()
+    rejected_hints: tuple[RepositoryGraphHintRejection, ...] = ()
 
 
 class CriticalitySignal(FrozenModel):
@@ -345,12 +355,24 @@ class ModuleOneSpecialistReview(FrozenModel):
     unknown_conditions: tuple[str, ...]
 
 
+class CoverageChecklistItem(FrozenModel):
+    """Whether a catalog risk category was examined. Never a statement that code is safe."""
+
+    entity_id: str
+    status: Literal["candidate_emitted", "examined_no_candidate", "not_applicable", "not_examined"]
+    note: str
+    # Set by the orchestrator, not the agent.
+    partition_id: str | None = None
+    mapped_candidate_count: int = Field(default=0, ge=0)
+
+
 class ModuleOneAgentOutput(FrozenModel):
     candidates: tuple[ModuleOneCandidateProposal, ...]
     analyzed_asset_ids: tuple[str, ...]
     coverage_warnings: tuple[str, ...]
     summary: str
     specialist_reviews: tuple[str, ...]
+    coverage_checklist: tuple[CoverageChecklistItem, ...] = ()
 
 
 class VerificationStatus(StrEnum):
@@ -540,12 +562,46 @@ class ApprovalEvent(FrozenModel):
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class StageMetric(FrozenModel):
+    stage: str
+    outcome: Literal["ok", "failed"]
+    duration_seconds: float = Field(ge=0)
+    model_calls: int = Field(ge=0)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    tool_calls: int = Field(ge=0)
+
+
+RunEventKind = Literal[
+    "cache_hit",
+    "contract_errors",
+    "repaired",
+    "salvaged",
+    "validated",
+    "partition_failed_closed",
+    "budget_exhausted",
+]
+
+
+class RunEvent(FrozenModel):
+    kind: RunEventKind
+    stage: str
+    detail: str = ""
+
+
 class ScanBundle(FrozenModel):
     graph: RepositoryAssetGraph
     candidates: tuple[PotentialVulnerabilityRow, ...]
     findings: tuple[DetectedVulnerabilityRow, ...] = ()
     planning: PlanningProposal | None = None
     optimization: OptimizationResult | None = None
+    scan_profile: str | None = None
+    # Per-partition OWASP API Top 10 examination record from Module I. Coverage, not safety.
+    module1_coverage: tuple[CoverageChecklistItem, ...] = ()
+    # Observed cost and behavior of this run: per-stage usage, repairs, salvages, cache hits,
+    # partitions that failed closed, and exhausted tool budgets.
+    run_metrics: tuple[StageMetric, ...] = ()
+    run_events: tuple[RunEvent, ...] = ()
 
 
 class FindingReverification(FrozenModel):

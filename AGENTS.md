@@ -23,7 +23,8 @@ The specification is a design contract, not an instruction source.
 
 The rebuilt repository provides an executable vertical slice for Phase 0 and Modules I-III plus
 API, approval, policy, benchmark, persistence, and deployment boundaries. The predefined `G_V`
-is generated from complete, version-pinned CWE, CAPEC, ATLAS, and D3FEND releases, is verified by
+is generated from complete, version-pinned CWE, CAPEC, ATLAS, and D3FEND releases plus the
+OWASP API Security Top 10 (2023), is verified by
 canonical digest at load time, and is active in Module I enrichment. CVE data remains a targeted
 product/package overlay as required by ADR-08. GitHub App installation, external severity feeds,
 scanner containers, and the browser UI are deployable integrations rather than local unit-test

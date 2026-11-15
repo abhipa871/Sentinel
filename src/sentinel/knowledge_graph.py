@@ -36,7 +36,9 @@ def load_predefined_graph(path: Path | None = None) -> KnowledgeGraphSnapshot:
     else:
         payload = gzip.decompress(path.read_bytes())
     graph = KnowledgeGraphSnapshot.model_validate_json(payload)
-    actual = graph_digest(graph.entities, graph.relations, graph.source_manifest)
+    actual = graph_digest(
+        graph.entities, graph.relations, graph.source_manifest, graph.parser_version
+    )
     if actual != graph.digest:
         raise ValueError("predefined vulnerability graph digest mismatch")
     return graph
@@ -56,6 +58,22 @@ class KnowledgeGraphIndex:
 
     def entity(self, entity_id: str) -> KnowledgeEntity | None:
         return self.entities.get(entity_id)
+
+    def owasp_api_risks(self, entity_id: str) -> tuple[KnowledgeEntity, ...]:
+        """OWASP API Top 10 risks that cite this entity, or the entity itself if it is one."""
+        entity = self.entities.get(entity_id)
+        if entity is not None and entity.entity_type == "OWASP_API_RISK":
+            return (entity,)
+        risks = {
+            relation.source_id: self.entities[relation.source_id]
+            for relation in self.incoming.get(entity_id, [])
+            if relation.relation_type == "REFERENCES_WEAKNESS"
+            and relation.source_id in self.entities
+            and self.entities[relation.source_id].entity_type == "OWASP_API_RISK"
+        }
+        return tuple(
+            sorted(risks.values(), key=lambda risk: int(risk.metadata.get("rank", 0) or 0))
+        )
 
     def neighborhood(self, entity_id: str, *, limit: int = 50) -> tuple[KnowledgeRelation, ...]:
         rows = self.outgoing.get(entity_id, []) + self.incoming.get(entity_id, [])

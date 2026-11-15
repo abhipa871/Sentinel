@@ -1,0 +1,153 @@
+{
+  "benchmark": "crapi-documented-challenges",
+  "repository": "https://github.com/OWASP/crAPI",
+  "commit": "b5fc307f3e5f875809b095b771108ef342a33724",
+  "source": "docs/challenges.md and docs/challengeSolutions.md at the pinned commit",
+  "scoring": "Category-level coverage per service, not endpoint-level: a challenge counts as covered when a row sits under service_prefix and its vulnerability ID equals, or is REFERENCES_WEAKNESS-linked in G_V to, one of expected_ids. service_source records whether the service is stated in crAPI's docs or inferred from which service implements that domain. The three secret challenges are not included.",
+  "challenges": [
+    {
+      "challenge_id": "crapi-01",
+      "title": "Access details of another user's vehicle",
+      "category": "BOLA",
+      "service_prefix": "services/identity/",
+      "service_source": "docs: /identity/api/v2/vehicle/<vehicleid>/location",
+      "expected_ids": ["OWASP-API:API1:2023", "CWE-639", "CWE-285"]
+    },
+    {
+      "challenge_id": "crapi-02",
+      "title": "Access mechanic reports of other users",
+      "category": "BOLA",
+      "service_prefix": "services/workshop/",
+      "service_source": "docs: /workshop/api/merchant/contact_mechanic exposes the report endpoint",
+      "expected_ids": ["OWASP-API:API1:2023", "CWE-639", "CWE-285"]
+    },
+    {
+      "challenge_id": "crapi-03",
+      "title": "Reset the password of a different user",
+      "category": "Broken User Authentication",
+      "service_prefix": "services/identity/",
+      "service_source": "code domain: OTP and password reset live in the identity service",
+      "expected_ids": ["OWASP-API:API2:2023", "CWE-307", "CWE-204", "CWE-287"]
+    },
+    {
+      "challenge_id": "crapi-04",
+      "title": "Find an API endpoint that leaks sensitive information of other users",
+      "category": "Excessive Data Exposure",
+      "service_prefix": "services/community/",
+      "service_source": "docs: /community/api/v2/community/posts/recent leaks other users' data",
+      "expected_ids": ["OWASP-API:API3:2023", "CWE-213", "CWE-200"]
+    },
+    {
+      "challenge_id": "crapi-05",
+      "title": "Find an API endpoint that leaks an internal property of a video",
+      "category": "Excessive Data Exposure",
+      "service_prefix": "services/identity/",
+      "service_source": "code domain: video resources live in the identity service",
+      "expected_ids": ["OWASP-API:API3:2023", "CWE-213", "CWE-200"]
+    },
+    {
+      "challenge_id": "crapi-06",
+      "title": "Perform a layer 7 DoS using the contact mechanic feature",
+      "category": "Rate Limiting",
+      "service_prefix": "services/workshop/",
+      "service_source": "code domain: contact_mechanic is a workshop merchant endpoint",
+      "expected_ids": ["OWASP-API:API4:2023", "CWE-770", "CWE-400", "CWE-799"]
+    },
+    {
+      "challenge_id": "crapi-07",
+      "title": "Delete a video of another user",
+      "category": "BFLA",
+      "service_prefix": "services/identity/",
+      "service_source": "code domain: video administration lives in the identity service",
+      "expected_ids": ["OWASP-API:API5:2023", "CWE-285", "CWE-862"]
+    },
+    {
+      "challenge_id": "crapi-08",
+      "title": "Get an item for free",
+      "category": "Mass Assignment",
+      "service_prefix": "services/workshop/",
+      "service_source": "docs: /workshop/api/shop/orders",
+      "expected_ids": ["OWASP-API:API3:2023", "CWE-915"]
+    },
+    {
+      "challenge_id": "crapi-09",
+      "title": "Increase your balance by $1,000 or more",
+      "category": "Mass Assignment",
+      "service_prefix": "services/workshop/",
+      "service_source": "docs: /workshop/api/shop/orders",
+      "expected_ids": ["OWASP-API:API3:2023", "CWE-915"]
+    },
+    {
+      "challenge_id": "crapi-10",
+      "title": "Update internal video properties",
+      "category": "Mass Assignment",
+      "service_prefix": "services/identity/",
+      "service_source": "code domain: video resources live in the identity service",
+      "expected_ids": ["OWASP-API:API3:2023", "CWE-915"]
+    },
+    {
+      "challenge_id": "crapi-11",
+      "title": "Make crAPI send an HTTP call to an external host and return the response",
+      "category": "SSRF",
+      "service_prefix": "services/workshop/",
+      "service_source": "code domain: contact_mechanic forwards to mechanic_api in workshop",
+      "expected_ids": ["OWASP-API:API7:2023", "CWE-918"]
+    },
+    {
+      "challenge_id": "crapi-12",
+      "title": "Get free coupons without knowing the coupon code",
+      "category": "NoSQL Injection",
+      "service_prefix": "services/community/",
+      "service_source": "code domain: coupon validation queries MongoDB in community",
+      "expected_ids": ["CWE-943"]
+    },
+    {
+      "challenge_id": "crapi-13",
+      "title": "Redeem an already claimed coupon by modifying the database",
+      "category": "SQL Injection",
+      "service_prefix": "services/workshop/",
+      "service_source": "code domain: coupon redemption uses SQL in the workshop shop",
+      "expected_ids": ["CWE-89"]
+    },
+    {
+      "challenge_id": "crapi-14",
+      "title": "Find an endpoint that does not perform authentication checks for a user",
+      "category": "Unauthenticated Access",
+      "service_prefix": null,
+      "service_source": "not stated in the docs; any service counts",
+      "expected_ids": ["OWASP-API:API2:2023", "CWE-306", "CWE-287", "CWE-862"]
+    },
+    {
+      "challenge_id": "crapi-15",
+      "title": "Forge valid JWT tokens",
+      "category": "JWT Vulnerabilities",
+      "service_prefix": "services/identity/",
+      "service_source": "docs: JWKS at /.well-known/jwks.json and the user dashboard API",
+      "expected_ids": ["OWASP-API:API2:2023", "CWE-347", "CWE-345", "CWE-287"]
+    },
+    {
+      "challenge_id": "crapi-16",
+      "title": "Use the chatbot to do a successful prompt injection",
+      "category": "LLM Vulnerabilities",
+      "service_prefix": "services/chatbot/",
+      "service_source": "code domain: the chatbot service",
+      "expected_ids": ["CWE-1427", "ATLAS:AML.T0051"]
+    },
+    {
+      "challenge_id": "crapi-17",
+      "title": "Extract the credentials of another user using the chatbot",
+      "category": "LLM Vulnerabilities",
+      "service_prefix": "services/chatbot/",
+      "service_source": "code domain: the chatbot service",
+      "expected_ids": ["CWE-200", "CWE-639", "CWE-1427", "ATLAS:AML.T0051"]
+    },
+    {
+      "challenge_id": "crapi-18",
+      "title": "Make the chatbot do an action on behalf of another user",
+      "category": "LLM Vulnerabilities",
+      "service_prefix": "services/chatbot/",
+      "service_source": "code domain: the chatbot service",
+      "expected_ids": ["OWASP-API:API1:2023", "OWASP-API:API5:2023", "CWE-862", "CWE-639", "CWE-285", "CWE-441", "CWE-1427"]
+    }
+  ]
+}
