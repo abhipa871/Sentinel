@@ -539,7 +539,9 @@ def test_unrecoverable_partition_fails_closed_and_the_scan_continues(polyglot_gr
         partitions=partitions,
         profile=get_profile("balanced"),
     )
-    assert rows and not any(row.node.startswith("go/") for row in rows)
+    agent_rows = [row for row in rows if "agent.module1.discovery.v1" in row.rule_ids]
+    # Rule-based leads for the failed partition remain; no agent-reviewed candidate does.
+    assert agent_rows and not any(row.node.startswith("go/") for row in agent_rows)
     assert any("[go] partition not analyzed" in w for w in rows[0].coverage_warnings)
     go_items = [item for item in module_one.coverage_checklist if item.partition_id == "go"]
     assert len(go_items) == 10 and {item.status for item in go_items} == {"not_examined"}

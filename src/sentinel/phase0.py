@@ -26,6 +26,7 @@ from sentinel.contracts import (
     RepositorySnapshot,
     UnresolvedReference,
 )
+from sentinel.signals import extract_signals, is_test_path, signal_names
 
 NAMESPACE = UUID("6d74e78a-b9ca-4aae-bc64-16f98b891f50")
 IGNORE_DIRS = {
@@ -208,7 +209,13 @@ class _PythonFacts(ast.NodeVisitor):
                 if isinstance(decorator, ast.Call)
                 else _call_name(decorator)
             )
-            if text and text.split(".")[-1].lower() in ROUTE_DECORATOR_NAMES:
+            if (
+                text
+                # unittest.mock's @patch / @mock.patch.object are not HTTP routes.
+                and text.split(".")[0] not in {"mock", "patch", "unittest"}
+                and text != "patch"
+                and text.split(".")[-1].lower() in ROUTE_DECORATOR_NAMES
+            ):
                 self.routes.append(text)
                 if isinstance(decorator, ast.Call) and decorator.args:
                     first = decorator.args[0]
@@ -740,6 +747,26 @@ class RepositoryExtractor:
                     "size_bytes": len(raw),
                 }
             )
+            hits = extract_signals(rel, text, language) if text else []
+            facts.features["security_signals"] = signal_names(hits)
+            facts.features["is_test"] = is_test_path(rel)
+            signal_evidence: dict[str, list[str]] = {}
+            for hit in hits:
+                span_id = _stable_id("ev", snapshot_id, rel, digest, hit.name, hit.line)
+                signal_evidence.setdefault(hit.name, []).append(span_id)
+                evidence.append(
+                    EvidenceRef(
+                        evidence_id=span_id,
+                        producer=f"phase0.signal.{hit.name}",
+                        source_path=rel,
+                        start_line=hit.line,
+                        end_line=hit.line,
+                        content_sha256=digest,
+                        assertion_origin="observed",
+                        summary=f"{hit.name} at {rel}:{hit.line}: {hit.excerpt}",
+                    )
+                )
+            facts.features["signal_evidence"] = signal_evidence
             parse_facts[rel] = facts
             status = (
                 CoverageState.METADATA_ONLY

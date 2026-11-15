@@ -1,0 +1,416 @@
+diff -ruN '--exclude=__pycache__' Sentinel/src/sentinel/knowledge.py v2/src/sentinel/knowledge.py
+--- a/src/sentinel/knowledge.py	2026-11-14 22:18:22.000000000 -0500
++++ b/src/sentinel/knowledge.py	2026-11-14 22:57:02.480890204 -0500
+@@ -36,7 +36,7 @@
+             "CWE-502": "https://cwe.mitre.org/data/definitions/502.html",
+             "AI-TOOL-AUTHZ": "curated:sentinel-ai-tool-authorization-v1",
+         },
+-        rules=(
++        rules=signal_rules() + (
+             ApplicabilityRule(
+                 rule_id="rule.cwe-89.python.sql-api.v1",
+                 vulnerability_id="CWE-89",
+@@ -124,3 +124,70 @@
+             ),
+         ),
+     )
++
++
++_SOURCE_LANGS = ("python", "java", "go", "javascript", "typescript")
++
++# (rule_id, CWE, name, required_features, excluded_features, preconditions, weight)
++_SIGNAL_RULES: tuple[tuple[str, str, str, dict, dict, tuple[str, ...], float], ...] = (
++    ("rule.cwe-639.bola.v1", "CWE-639", "Authorization Bypass Through User-Controlled Key",
++     {"all_signals": ("object_id_param", "lookup_by_client_id")}, {},
++     ("identifier_is_client_controlled", "lookup_not_scoped_to_caller", "object_is_sensitive"), 0.85),
++    ("rule.cwe-285.bfla-admin.v1", "CWE-285", "Improper Authorization",
++     {"all_signals": ("admin_route",)}, {},
++     ("route_is_privileged", "role_check_absent_or_ineffective"), 0.8),
++    ("rule.cwe-306.unauth-handler.v1", "CWE-306", "Missing Authentication for Critical Function",
++     {"all_signals": ("unauthenticated_handler", "lookup_by_client_id")}, {},
++     ("handler_exposes_sensitive_data_or_action", "no_upstream_authentication"), 0.8),
++    ("rule.cwe-307.auth-bruteforce.v1", "CWE-307", "Improper Restriction of Excessive Authentication Attempts",
++     {"all_signals": ("auth_sensitive_route",)}, {"any_signals": ("rate_limit_marker",)},
++     ("secret_space_is_enumerable", "no_attempt_limit_upstream"), 0.7),
++    ("rule.cwe-918.ssrf.v1", "CWE-918", "Server-Side Request Forgery (SSRF)",
++     {"all_signals": ("outbound_request_dynamic", "request_body_input")}, {},
++     ("url_or_host_is_attacker_controlled", "no_allowlist", "response_or_side_effect_observable"), 0.9),
++    ("rule.cwe-770.repeat-amplification.v1", "CWE-770", "Allocation of Resources Without Limits or Throttling",
++     {"all_signals": ("request_repeat_param", "outbound_request_dynamic")}, {},
++     ("repeat_count_is_client_controlled", "bound_is_ineffective"), 0.7),
++    ("rule.cwe-89.concat.v1", "CWE-89", "Improper Neutralization of Special Elements used in an SQL Command",
++     {"all_signals": ("raw_sql_concat",)}, {},
++     ("concatenated_value_is_untrusted", "sink_is_reachable"), 0.95),
++    ("rule.cwe-943.nosql-filter.v1", "CWE-943", "Improper Neutralization of Special Elements in Data Query Logic",
++     {"all_signals": ("nosql_query", "untyped_request_filter")}, {},
++     ("request_object_reaches_query_filter", "operators_not_stripped"), 0.9),
++    ("rule.cwe-915.mass-assignment.v1", "CWE-915", "Improperly Controlled Modification of Dynamically-Determined Object Attributes",
++     {"any_signals": ("attr_from_request", "serializer_all_fields")}, {},
++     ("field_is_security_relevant", "no_allowlist_or_server_side_validation"), 0.75),
++    ("rule.cwe-347.jwt-header-trust.v1", "CWE-347", "Improper Verification of Cryptographic Signature",
++     {"all_signals": ("jwt_header_trust",)}, {},
++     ("algorithm_or_key_selected_from_token", "verification_accepts_attacker_key"), 0.95),
++    ("rule.cwe-213.exposure.v1", "CWE-213", "Exposure of Sensitive Information Due to Incompatible Policies",
++     {"any_signals": ("sensitive_json_field", "jpa_entity_unfiltered", "serializer_all_fields")},
++     {},
++     ("object_is_returned_to_other_users", "field_is_sensitive"), 0.6),
++    ("rule.cwe-1427.prompt-injection.v1", "CWE-1427", "Improper Neutralization of Input Used for LLM Prompting",
++     {"all_signals": ("llm_client", "llm_tools_or_agent")}, {},
++     ("untrusted_text_reaches_prompt", "model_output_drives_tools_or_data_access"), 0.85),
++    ("rule.cwe-441.confused-deputy.v1", "CWE-441", "Unintended Proxy or Intermediary ('Confused Deputy')",
++     {"all_signals": ("tool_server", "static_service_credential")}, {},
++     ("tool_calls_use_service_identity", "end_user_authorization_not_propagated"), 0.85),
++)
++
++
++def signal_rules() -> tuple[ApplicabilityRule, ...]:
++    return tuple(
++        ApplicabilityRule(
++            rule_id=rule_id,
++            vulnerability_id=cwe,
++            vulnerability_name=name,
++            rule_version=1,
++            applicable_asset_types=(AssetType.SOURCE_FILE,),
++            language_tags=_SOURCE_LANGS,
++            required_features=required,
++            excluded_features=excluded,
++            necessary_preconditions=pre,
++            derivation_kind="curated_derived",
++            source_refs=(f"https://cwe.mitre.org/data/definitions/{cwe.split('-')[1]}.html",),
++            weight=weight,
++        )
++        for rule_id, cwe, name, required, excluded, pre, weight in _SIGNAL_RULES
++    )
+diff -ruN '--exclude=__pycache__' Sentinel/src/sentinel/module1.py v2/src/sentinel/module1.py
+--- a/src/sentinel/module1.py	2026-11-14 22:18:22.000000000 -0500
++++ b/src/sentinel/module1.py	2026-11-14 22:57:02.494542794 -0500
+@@ -35,8 +35,26 @@
+         return PredicateResult("no_match", (), ())
+     if rule.language_tags and asset.language not in rule.language_tags:
+         return PredicateResult("no_match", (), ())
++    if asset.features.get("is_test") or not asset.size_bytes:
++        # Tests and empty files are not deployed attack surface (empty files previously
++        # produced "unknown" predicates and were emitted as candidates).
++        return PredicateResult("no_match", (), ())
+     required = rule.required_features
+     symbols = _feature_symbols(asset.features)
++    signals = set(asset.features.get("security_signals", ()))
++    signal_evidence: dict[str, list[str]] = asset.features.get("signal_evidence", {})
++    matched_signals: set[str] = set()
++    if all_of := required.get("all_signals"):
++        if not set(all_of) <= signals:
++            return PredicateResult("no_match", (), ())
++        matched_signals |= set(all_of)
++    if any_of := required.get("any_signals"):
++        found = set(any_of) & signals
++        if not found:
++            return PredicateResult("no_match", (), ())
++        matched_signals |= found
++    if set(rule.excluded_features.get("any_signals", ())) & signals:
++        return PredicateResult("no_match", (), ())
+     if expected := required.get("any_api_symbols"):
+         matches = {
+             symbol
+@@ -54,7 +72,10 @@
+     excluded = rule.excluded_features.get("any_api_symbols", ())
+     if any(symbol in symbols for symbol in excluded):
+         return PredicateResult("no_match", (), ())
+-    return PredicateResult("match", asset.evidence_refs, ())
++    spans = tuple(
++        sorted({ref for name in matched_signals for ref in signal_evidence.get(name, ())})
++    )
++    return PredicateResult("match", spans or asset.evidence_refs, ())
+ 
+ 
+ def _candidate_id(
+diff -ruN '--exclude=__pycache__' Sentinel/src/sentinel/phase0.py v2/src/sentinel/phase0.py
+--- a/src/sentinel/phase0.py	2026-11-14 22:18:22.000000000 -0500
++++ b/src/sentinel/phase0.py	2026-11-14 22:57:02.507887478 -0500
+@@ -12,6 +12,7 @@
+ from typing import Any, Literal
+ from uuid import UUID, uuid5
+ 
++from sentinel.signals import extract_signals, is_test_path, signal_names
+ from sentinel.contracts import (
+     Asset,
+     AssetEdge,
+@@ -110,7 +111,7 @@
+                 if isinstance(decorator, ast.Call)
+                 else _call_name(decorator)
+             )
+-            if text and text.split(".")[-1].lower() in {
++            if text and not text.split(".")[0] in {"mock", "patch", "unittest"} and text != "patch" and text.split(".")[-1].lower() in {
+                 "get",
+                 "post",
+                 "put",
+@@ -129,7 +130,7 @@
+                 if isinstance(decorator, ast.Call)
+                 else _call_name(decorator)
+             )
+-            if text and text.split(".")[-1].lower() in {
++            if text and not text.split(".")[0] in {"mock", "patch", "unittest"} and text != "patch" and text.split(".")[-1].lower() in {
+                 "get",
+                 "post",
+                 "put",
+@@ -336,6 +337,26 @@
+                     "size_bytes": len(raw),
+                 }
+             )
++            hits = extract_signals(rel, text, language) if text else []
++            facts.features["security_signals"] = signal_names(hits)
++            facts.features["is_test"] = is_test_path(rel)
++            signal_evidence: dict[str, list[str]] = {}
++            for hit in hits:
++                span_id = _stable_id("ev", snapshot_id, rel, digest, hit.name, hit.line)
++                signal_evidence.setdefault(hit.name, []).append(span_id)
++                evidence.append(
++                    EvidenceRef(
++                        evidence_id=span_id,
++                        producer=f"phase0.signal.{hit.name}",
++                        source_path=rel,
++                        start_line=hit.line,
++                        end_line=hit.line,
++                        content_sha256=digest,
++                        assertion_origin="observed",
++                        summary=f"{hit.name} at {rel}:{hit.line}: {hit.excerpt}",
++                    )
++                )
++            facts.features["signal_evidence"] = signal_evidence
+             parse_facts[rel] = facts
+             status = (
+                 CoverageState.METADATA_ONLY
+diff -ruN '--exclude=__pycache__' Sentinel/src/sentinel/signals.py v2/src/sentinel/signals.py
+--- a/src/sentinel/signals.py	1969-12-31 19:00:00.000000000 -0500
++++ b/src/sentinel/signals.py	2026-11-14 22:57:02.521094690 -0500
+@@ -0,0 +1,231 @@
++"""Reviewed, language-aware static security signals for Phase 0.
++
++Signals are syntactic observations with exact line spans. They are *not* findings: Module I
++rules combine them into potential candidates and Module II decides applicability. Comments and
++docstrings are blanked before matching so that repository prose (which is hostile data, and in
++benchmark repos often names the vulnerability outright) cannot drive candidate generation.
++"""
++
++from __future__ import annotations
++
++import ast
++import re
++from dataclasses import dataclass
++from pathlib import PurePosixPath
++
++TEST_PATH = re.compile(
++    r"(^|/)(tests?|__tests__|spec|testdata|fixtures?)(/|$|\.py$)|(^|/)test_[^/]*\.py$|_test\.(go|py)$"
++    r"|\.(spec|test)\.[jt]sx?$|(^|/)[^/]*Tests?\.java$"
++)
++
++
++@dataclass(frozen=True)
++class SignalHit:
++    name: str
++    line: int
++    excerpt: str
++
++
++def is_test_path(path: str) -> bool:
++    return bool(TEST_PATH.search(path))
++
++
++def _blank(match: re.Match[str]) -> str:
++    return re.sub(r"[^\n]", " ", match.group(0))
++
++
++def strip_comments(text: str, language: str | None) -> str:
++    """Blank comments/docstrings while preserving line numbers."""
++    if language == "python":
++        text = re.sub(r'("""|\'\'\')(?:.|\n)*?\1', _blank, text)
++        return re.sub(r"(?m)#.*$", _blank, text)
++    if language in {"java", "go", "javascript", "typescript", "rust"}:
++        text = re.sub(r"/\*(?:.|\n)*?\*/", _blank, text)
++        return re.sub(r"(?m)(?<![:\"'])//.*$", _blank, text)
++    return text
++
++
++I = re.IGNORECASE
++# name -> {language: [patterns]}; "*" applies to every source language.
++PATTERNS: dict[str, dict[str, list[re.Pattern[str]]]] = {
++    "route_handler": {
++        "python": [
++            re.compile(r"@\w+(?:\.\w+)*\.(?:route|get|post|put|delete|api_route)\("),
++            re.compile(r"^\s*def (?:get|post|put|patch|delete)\(self,\s*request", re.M),
++        ],
++        "java": [re.compile(r"@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b")],
++        "go": [re.compile(r"\.(?:HandleFunc|Handle)\(|\.Methods\(\"|\.(?:GET|POST|PUT|DELETE)\(\"")],
++        "javascript": [re.compile(r"\b(?:app|router)\.(?:get|post|put|delete|patch)\(")],
++        "typescript": [re.compile(r"\b(?:app|router)\.(?:get|post|put|delete|patch)\(")],
++    },
++    "object_id_param": {
++        "python": [
++            re.compile(r"request\.(?:GET|query_params|data)\[\s*[\"']\w*id[\"']\s*\]", I),
++            re.compile(r"\b\w+_id\s*=\s*None\b"),
++            re.compile(r"<(?:int|uuid|str):\w*id>|\(\?P<\w*id>", I),
++        ],
++        "java": [re.compile(r"@PathVariable|@RequestParam\(\s*\"?\w*id", I)],
++        "go": [re.compile(r"mux\.Vars\(|URL\.Query\(\)\.Get\(\"\w*id", I)],
++        "javascript": [re.compile(r"req\.(?:params|query)\.\w*id", I)],
++        "typescript": [re.compile(r"req\.(?:params|query)\.\w*id", I)],
++    },
++    "lookup_by_client_id": {
++        "python": [re.compile(r"\.objects\.(?:get|filter)\(\s*(?:id|pk|\w+_id)\s*=\s*(?!user\b)\w")],
++        "java": [re.compile(r"\.(?:findById|findByUuid|findBy\w*Id|getById|getReferenceById)\(\s*(?!user)")],
++        "go": [re.compile(r"\.(?:First|Find|Where|FindOne)\([^)]*\b(?:id|ID|Id)\b")],
++        "javascript": [re.compile(r"\.(?:findById|findByPk|findOne)\(\s*req\.")],
++        "typescript": [re.compile(r"\.(?:findById|findByPk|findOne)\(\s*req\.")],
++    },
++    "admin_route": {
++        "java": [re.compile(r"Mapping\(\s*(?:value\s*=\s*)?\"[^\"]*/admin/", I)],
++        "python": [re.compile(r"(?:path|re_path|url|route)\(\s*r?[\"'][^\"']*admin", I)],
++        "go": [re.compile(r"\"[^\"]*/admin/[^\"]*\"", I)],
++    },
++    "auth_sensitive_route": {
++        "java": [re.compile(r"Mapping\(\s*(?:value\s*=\s*)?\"[^\"]*(?:otp|login|password|reset|token)", I)],
++        "python": [re.compile(r"(?:path|re_path|url|route|post)\(\s*r?[\"'][^\"']*(?:otp|login|password|reset)", I)],
++        "go": [re.compile(r"HandleFunc\(\s*\"[^\"]*(?:otp|login|password|reset)", I)],
++    },
++    "rate_limit_marker": {
++        "*": [re.compile(r"ratelimit|rate_limit|throttl|bucket4j|RateLimiter|max_?attempts|lockout", I)],
++    },
++    "outbound_request_dynamic": {
++        "python": [re.compile(r"\b(?:requests|httpx|session)\.(?:get|post|put|request|head)\(\s*(?![\"'f])\w"),
++                   re.compile(r"\burlopen\(\s*(?![\"'])\w")],
++        "java": [re.compile(r"\.openConnection\(|new URL\(\s*(?!\")|RestTemplate|WebClient\.")],
++        "go": [re.compile(r"http\.(?:Get|Post|NewRequest)\(\s*(?:\"[A-Z]+\",\s*)?(?!\")\w")],
++        "javascript": [re.compile(r"\b(?:axios\.\w+|fetch|got)\(\s*(?![\"'`])\w")],
++        "typescript": [re.compile(r"\b(?:axios\.\w+|fetch|got)\(\s*(?![\"'`])\w")],
++    },
++    "request_repeat_param": {
++        "*": [re.compile(r"[\"']\w*(?:repeat|retries|retry|times|number_of)\w*[\"']", I)],
++    },
++    "raw_sql_concat": {
++        "python": [re.compile(r"\.(?:execute|executemany|raw)\(\s*(?:f[\"']|[\"'][^\"']*[\"']\s*(?:\+|%|\.format))")],
++        "java": [re.compile(r"create(?:Native)?Query\([^;]*\+|createStatement\(\)")],
++        "go": [re.compile(r"\.(?:Raw|Exec|Query)\(\s*(?:fmt\.Sprintf|\"[^\"]*\"\s*\+)")],
++        "javascript": [re.compile(r"\.(?:query|raw)\(\s*(?:`[^`]*\$\{|[\"'][^\"']*[\"']\s*\+)")],
++        "typescript": [re.compile(r"\.(?:query|raw)\(\s*(?:`[^`]*\$\{|[\"'][^\"']*[\"']\s*\+)")],
++    },
++    "nosql_query": {
++        "go": [re.compile(r"\.(?:Find|FindOne|UpdateOne|DeleteOne|Aggregate)\(")],
++        "python": [re.compile(r"\.(?:find|find_one|update_one|delete_one|aggregate)\(")],
++        "javascript": [re.compile(r"\.(?:find|findOne|updateOne|deleteOne|aggregate)\(|\$where")],
++        "typescript": [re.compile(r"\.(?:find|findOne|updateOne|deleteOne|aggregate)\(|\$where")],
++    },
++    "untyped_request_filter": {
++        "go": [re.compile(r"var \w+ (?:bson\.M|map\[string\]interface\{\})|\w+ bson\.M\)")],
++        "python": [re.compile(r"json\.loads\(\s*request|=\s*request\.(?:data|json)\s*$", re.M)],
++        "javascript": [re.compile(r"\.(?:find|findOne)\(\s*req\.(?:body|query)")],
++        "typescript": [re.compile(r"\.(?:find|findOne)\(\s*req\.(?:body|query)")],
++    },
++    "request_body_input": {
++        "python": [re.compile(r"request\.(?:data|GET|POST|body|json|query_params)\b|request_data")],
++        "java": [re.compile(r"@RequestBody|@RequestParam|HttpServletRequest")],
++        "go": [re.compile(r"r\.Body|ReadAll\(r|r\.URL\.Query|json\.Unmarshal\(")],
++        "javascript": [re.compile(r"req\.(?:body|query|params)")],
++        "typescript": [re.compile(r"req\.(?:body|query|params)")],
++    },
++    "attr_from_request": {
++        "python": [re.compile(r"\b\w+\.\w+\s*=\s*(?:request_data|request\.data)\[")],
++        "java": [re.compile(r"\.set\w+\(\s*\w+(?:Form|Request|Dto|DTO)\.get\w+\(\)")],
++        "go": [re.compile(r"Decode\(&\w+\)")],
++        "javascript": [re.compile(r"Object\.assign\(\s*\w+,\s*req\.body|\.update\(\s*req\.body")],
++        "typescript": [re.compile(r"Object\.assign\(\s*\w+,\s*req\.body|\.update\(\s*req\.body")],
++    },
++    "serializer_all_fields": {
++        "python": [re.compile(r"fields\s*=\s*[\"']__all__[\"']")],
++    },
++    "jwt_header_trust": {
++        "java": [re.compile(r"getAlgorithm\(\)|getJWKURL\(\)|parseUnverified|Algorithm\.none|alg\.getName\(\)")],
++        "python": [re.compile(r"get_unverified_header|verify_signature[\"']?\s*:\s*False|jwt\.decode\([^)]*verify\s*=\s*False")],
++        "go": [re.compile(r"token\.Header\[\s*\"(?:alg|kid|jku)\"")],
++        "javascript": [re.compile(r"jwt\.decode\(|algorithms\s*:\s*\[[^\]]*none", I)],
++        "typescript": [re.compile(r"jwt\.decode\(|algorithms\s*:\s*\[[^\]]*none", I)],
++    },
++    "sensitive_json_field": {
++        "go": [re.compile(r"json:\"(?:email|password|vehicleid|vin|phone\w*|ssn|token|api_?key)\"", I)],
++    },
++    "jpa_entity_unfiltered": {
++        "java": [re.compile(r"^@Entity\b", re.M)],
++    },
++    "json_ignore_marker": {
++        "java": [re.compile(r"@JsonIgnore|JsonProperty\.Access")],
++    },
++    "llm_client": {
++        "python": [re.compile(r"\b(?:ChatOpenAI|AzureChatOpenAI|ChatAnthropic|ChatBedrock\w*|init_chat_model|OpenAI)\(")],
++        "javascript": [re.compile(r"new OpenAI\(|ChatOpenAI\(")],
++        "typescript": [re.compile(r"new OpenAI\(|ChatOpenAI\(")],
++    },
++    "llm_tools_or_agent": {
++        "python": [re.compile(r"create_react_agent|bind_tools|AgentExecutor|initialize_agent|StateGraph\(|MultiServerMCPClient|get_tools\(")],
++        "javascript": [re.compile(r"tools\s*:\s*\[|createReactAgent")],
++        "typescript": [re.compile(r"tools\s*:\s*\[|createReactAgent")],
++    },
++    "tool_server": {
++        "python": [re.compile(r"FastMCP|@\w+\.tool\b|from_openapi\(")],
++    },
++    "static_service_credential": {
++        "python": [re.compile(r"(?:api_?key|token|secret)\w*\s*=\s*(?:os\.(?:environ|getenv)|config|settings)", I),
++                   re.compile(r"[\"']Authorization[\"']\s*:\s*f?[\"'](?:Bearer|ApiKey)", I)],
++    },
++}
++
++
++def _python_unauthenticated_handlers(text: str) -> list[SignalHit]:
++    """HTTP handler methods/functions with no auth decorator or class permission policy."""
++    try:
++        tree = ast.parse(text)
++    except (SyntaxError, ValueError):
++        return []
++    auth_words = ("auth", "login_required", "permission", "jwt")
++    hits: list[SignalHit] = []
++
++    def decorated_auth(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
++        return any(any(w in ast.unparse(d).lower() for w in auth_words) for d in node.decorator_list)
++
++    for node in ast.walk(tree):
++        if isinstance(node, ast.ClassDef) and any(
++            ast.unparse(b).endswith(("APIView", "View", "ViewSet")) for b in node.bases
++        ):
++            class_policy = any(
++                isinstance(s, ast.Assign)
++                and any(getattr(t, "id", "") in {"permission_classes", "authentication_classes"} for t in s.targets)
++                for s in node.body
++            )
++            for item in node.body:
++                if (
++                    isinstance(item, ast.FunctionDef)
++                    and item.name in {"get", "post", "put", "patch", "delete"}
++                    and not class_policy
++                    and not decorated_auth(item)
++                ):
++                    hits.append(SignalHit("unauthenticated_handler", item.lineno, f"{node.name}.{item.name}"))
++    return hits
++
++
++def extract_signals(path: str, text: str, language: str | None) -> list[SignalHit]:
++    if language not in {"python", "java", "go", "javascript", "typescript"}:
++        return []
++    code = strip_comments(text, language)
++    lines = text.splitlines()
++    hits: list[SignalHit] = []
++    for name, table in PATTERNS.items():
++        for pattern in table.get(language, []) + table.get("*", []):
++            for match in pattern.finditer(code):
++                line = code.count("\n", 0, match.start()) + 1
++                excerpt = lines[line - 1].strip()[:160] if line <= len(lines) else ""
++                hits.append(SignalHit(name, line, excerpt))
++    if language == "python":
++        hits.extend(_python_unauthenticated_handlers(text))
++    # De-duplicate per (signal, line).
++    unique = {(h.name, h.line): h for h in hits}
++    return sorted(unique.values(), key=lambda h: (h.name, h.line))
++
++
++def signal_names(hits: list[SignalHit]) -> list[str]:
++    return sorted({h.name for h in hits})
++
++
++__all__ = ["SignalHit", "extract_signals", "is_test_path", "signal_names", "strip_comments"]
++_ = PurePosixPath

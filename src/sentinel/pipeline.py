@@ -64,7 +64,23 @@ class SentinelPipeline:
             return None
         if payload.get("observation_digest") != observations.digest:
             return None
-        return RepositoryAssetGraph.model_validate(payload["graph"])
+        graph = RepositoryAssetGraph.model_validate(payload["graph"])
+        observed_assets = {asset.asset_id: asset for asset in observations.assets}
+        assets = tuple(
+            asset.model_copy(
+                update={
+                    "features": {**asset.features, **observed_assets[asset.asset_id].features},
+                    "evidence_refs": tuple(
+                        dict.fromkeys(
+                            (*asset.evidence_refs, *observed_assets[asset.asset_id].evidence_refs)
+                        )
+                    ),
+                }
+            )
+            for asset in graph.assets
+        )
+        evidence = {item.evidence_id: item for item in (*graph.evidence, *observations.evidence)}
+        return graph.model_copy(update={"assets": assets, "evidence": tuple(evidence.values())})
 
     def _save_agent_graph_checkpoint(
         self,

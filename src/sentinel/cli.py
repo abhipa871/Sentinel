@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
 
 from sentinel.agents.runtime import DeepAgentsRuntime
 from sentinel.config import get_settings
@@ -51,6 +55,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print one line per stage, repair, salvage, cache hit, and budget event to stderr",
     )
+    scan.add_argument("--provider-timeout", type=float, help="Model request timeout in seconds")
     scan.add_argument("--output", type=Path)
     api = sub.add_parser("api", help="Run the FastAPI service")
     api.add_argument("--host", default="127.0.0.1")
@@ -60,17 +65,28 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    load_dotenv(Path.cwd() / ".env", override=False)
     if args.command == "api":
         import uvicorn
 
         uvicorn.run("sentinel.api:app", host=args.host, port=args.port)
         return 0
+    if args.progress:
+        logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
+        logging.getLogger("sentinel.agents.runtime").setLevel(logging.INFO)
+    if args.provider_timeout is not None and not 0 < args.provider_timeout < float("inf"):
+        raise SystemExit("--provider-timeout must be a finite positive number")
     profile = get_profile(args.profile or get_settings().default_scan_profile)
-    runtime = (
-        DeepAgentsRuntime(args.model, profile=profile, reasoning_effort=args.reasoning_effort)
-        if args.model
-        else None
-    )
+    # Only non-default options are passed, so the runtime's own defaults stay authoritative.
+    runtime_options: dict[str, Any] = {}
+    if profile.name != "balanced":
+        runtime_options["profile"] = profile
+    if args.reasoning_effort != "auto":
+        runtime_options["reasoning_effort"] = args.reasoning_effort
+    if args.provider_timeout is not None:
+        runtime_options["provider_timeout_seconds"] = args.provider_timeout
+        runtime_options["max_provider_retries"] = 0
+    runtime = DeepAgentsRuntime(args.model, **runtime_options) if args.model else None
     if args.through != "module1" and runtime is None:
         raise SystemExit("--model is required for Module II or III")
     bundle = SentinelPipeline(runtime=runtime).scan(

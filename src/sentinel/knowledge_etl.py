@@ -128,10 +128,20 @@ def parse_cwe(artifact: CatalogArtifact) -> tuple[list[KnowledgeEntity], list[Kn
                     or _text(item.find("{*}Summary")),
                     raw_id=raw_id,
                     status=item.attrib.get("Status"),
+                    aliases=tuple(
+                        text
+                        for term in item.findall("{*}Alternate_Terms/{*}Alternate_Term/{*}Term")
+                        if (text := _text(term))
+                    ),
                     metadata=_metadata(
                         catalog_kind=kind.lower(),
                         abstraction=item.attrib.get("Abstraction"),
                         structure=item.attrib.get("Structure"),
+                        extended_description=_text(item.find("{*}Extended_Description")),
+                        common_consequences=_text(item.find("{*}Common_Consequences")),
+                        detection_methods=_text(item.find("{*}Detection_Methods")),
+                        applicable_platforms=_text(item.find("{*}Applicable_Platforms")),
+                        mapping_notes=_text(item.find("{*}Mapping_Notes")),
                     ),
                     source_system="MITRE CWE",
                     source_version=artifact.version,
