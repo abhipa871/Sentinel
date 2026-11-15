@@ -10,10 +10,17 @@ class FakeDeepRuntime:
 
     def __init__(self, invalid_evidence: bool = False) -> None:
         self.invalid_evidence = invalid_evidence
+        self.observed_evidence: dict = {}
 
     def review_candidate(self, candidate, graph, **_):
-        line_level = next(item.evidence_id for item in graph.evidence if item.start_line)
-        evidence = "ev:missing" if self.invalid_evidence else line_level
+        from sentinel.agents.runtime import EvidenceToolbox
+
+        # A narrow, hash-verified span in the candidate's own file, as a real review would cite.
+        toolbox = EvidenceToolbox(graph, mint_span_evidence=True)
+        toolbox.read_source_span(candidate.node, 1, 3)
+        span = next(iter(toolbox.span_evidence.values()))
+        self.observed_evidence[span.evidence_id] = span
+        evidence = "ev:missing" if self.invalid_evidence else span.evidence_id
         return SecurityReviewProposal(
             candidate_id=candidate.candidate_id,
             primary_asset_id=candidate.asset_id,
@@ -118,3 +125,38 @@ def test_cited_spans_validate_and_are_published_with_findings(sample_graph):
     findings = module_two.run((candidate,), sample_graph)
     assert findings[0].verification_status is VerificationStatus.CONFIRMED
     assert module_two.cited_evidence == (span,)
+
+
+def test_positive_verdict_needs_a_narrow_span_in_the_primary_file(sample_graph):
+    from sentinel.agents.runtime import EvidenceToolbox
+    from sentinel.module2 import InvalidAgentProposal, validate_security_review
+
+    candidate = next(
+        row
+        for row in ModuleOne().run(sample_graph, curated_mvp_knowledge())
+        if row.node == "services/loader.py"
+    )
+    toolbox = EvidenceToolbox(sample_graph, mint_span_evidence=True)
+    toolbox.read_source_span("api/routes.py", 1, 3)
+    elsewhere = next(iter(toolbox.span_evidence.values()))
+    proposal = FakeDeepRuntime().review_candidate(candidate, sample_graph)
+    other_file = proposal.model_copy(update={"supporting_evidence_refs": (elsewhere.evidence_id,)})
+    try:
+        validate_security_review(
+            other_file, candidate, sample_graph, {elsewhere.evidence_id: elsewhere}
+        )
+    except InvalidAgentProposal as exc:
+        assert "in the primary file services/loader.py" in str(exc)
+    else:
+        raise AssertionError("a span only in another file must not support a positive verdict")
+    whole_file = elsewhere.model_copy(
+        update={"source_path": "services/loader.py", "start_line": 1, "end_line": 400}
+    )
+    try:
+        validate_security_review(
+            other_file, candidate, sample_graph, {elsewhere.evidence_id: whole_file}
+        )
+    except InvalidAgentProposal as exc:
+        assert "at most 60 lines" in str(exc)
+    else:
+        raise AssertionError("a whole-file read must not support a positive verdict")

@@ -67,8 +67,31 @@ def test_invalid_reviews_are_not_cached(sample_graph, tmp_path):
     runtime._invoke_stage = invalid  # type: ignore[method-assign]
     runtime.review_candidate(candidate, sample_graph)
     runtime.review_candidate(candidate, sample_graph)
-    assert len(calls) == 2
+    # Each review gets one repair round; an output that is still invalid is never cached.
+    assert calls == ["module2-candidate-review", "module2-review-repair"] * 2
     assert not list(tmp_path.glob("*/output.json"))
+
+
+def test_review_repair_round_recovers_a_rejected_proposal(sample_graph, tmp_path):
+    candidate = ModuleOne().run(sample_graph, curated_mvp_knowledge())[0]
+    runtime, calls = _counting_runtime(tmp_path, candidate)
+    original = runtime._invoke_stage
+    seen: list[dict] = []
+
+    def first_invalid(agent, payload, stage):
+        result = original(agent, payload, stage)
+        seen.append(json.loads(payload["messages"][0]["content"]))
+        if stage == "module2-candidate-review":
+            bad = result["structured_response"].model_copy(update={"vulnerability_id": "CWE-79"})
+            return {**result, "structured_response": bad}
+        return result
+
+    runtime._invoke_stage = first_invalid  # type: ignore[method-assign]
+    proposal = runtime.review_candidate(candidate, sample_graph)
+    assert calls == ["module2-candidate-review", "module2-review-repair"]
+    assert proposal.vulnerability_id == candidate.vulnerability_id
+    assert "vulnerability ID mismatch" in seen[1]["contract_validation_error"]
+    assert list(tmp_path.glob("*/output.json")), "the repaired, valid review is cached"
 
 
 def test_finding_ids_are_stable_across_reruns(sample_graph):
@@ -144,3 +167,35 @@ def test_concurrency_and_review_budgets_do_not_invalidate_discovery_caches(sampl
     assert pipeline._agent_graph_checkpoint(sample_graph, balanced) == (
         pipeline._agent_graph_checkpoint(sample_graph, deeper)
     )
+
+
+def test_only_review_agents_are_told_about_source_span_handles():
+    # Regression: telling Module I agents that S###### handles exist made them cite invented
+    # ones, and valid candidates were dropped. Only Module II toolboxes mint them.
+    from sentinel.agents.runtime import HANDLE_OUTPUT_RULE, REVIEW_HANDLE_RULE
+
+    assert "S######" not in HANDLE_OUTPUT_RULE
+    assert "S######" in REVIEW_HANDLE_RULE
+
+
+def test_tool_budget_also_caps_accumulated_evidence():
+    # One review once read 1.5M tokens of source; the cap bounds what an agent can accumulate.
+    from types import SimpleNamespace
+
+    from langchain_core.messages import ToolMessage
+
+    from sentinel.agents.runtime import ToolBudgetMiddleware
+
+    budget = ToolBudgetMiddleware(50, label="probe", content_limit=100)
+
+    def request(index: int) -> SimpleNamespace:
+        return SimpleNamespace(tool_call={"id": f"c{index}", "name": "read"}, state={})
+
+    def handler(req: SimpleNamespace) -> ToolMessage:
+        return ToolMessage(content="x" * 80, tool_call_id=req.tool_call["id"])
+
+    assert budget.wrap_tool_call(request(1), handler).status == "success"
+    assert budget.wrap_tool_call(request(2), handler).status == "success"  # 80 < 100 before it
+    refused = budget.wrap_tool_call(request(3), handler)
+    assert refused.status == "error" and "evidence read: 160 characters of 100" in refused.content
+    assert budget.executed == 2

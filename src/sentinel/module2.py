@@ -22,6 +22,10 @@ class InvalidAgentProposal(ValueError):
     pass
 
 
+# A positive verdict must point at specific lines, not a whole-file read.
+MAX_CITED_SPAN_LINES = 60
+
+
 def validate_security_review(
     proposal: SecurityReviewProposal,
     candidate: PotentialVulnerabilityRow,
@@ -52,11 +56,25 @@ def validate_security_review(
             raise InvalidAgentProposal("positive verdict requires real evidence")
         if "evidence-review" not in proposal.specialist_reviews:
             raise InvalidAgentProposal("positive verdict requires independent evidence review")
-        if not any(
-            records[item].start_line is not None for item in proposal.supporting_evidence_refs
-        ):
+        spans = [
+            records[item]
+            for item in proposal.supporting_evidence_refs
+            if records[item].start_line is not None
+        ]
+        if not spans:
             # File inventory records only show that a file exists.
             raise InvalidAgentProposal("positive verdict requires line-level source evidence")
+        if not any(
+            span.source_path == candidate.node
+            and (span.end_line or span.start_line or 0) - (span.start_line or 0)
+            < MAX_CITED_SPAN_LINES
+            for span in spans
+        ):
+            raise InvalidAgentProposal(
+                "positive verdict requires a cited source span of at most "
+                f"{MAX_CITED_SPAN_LINES} lines in the primary file {candidate.node}; whole-file "
+                "reads and spans only in other files do not show the weakness there"
+            )
     if (
         proposal.status is VerificationStatus.CONFIRMED
         and len(set(proposal.specialist_reviews)) < 2

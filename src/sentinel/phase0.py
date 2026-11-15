@@ -129,6 +129,113 @@ _NON_CALL_WORDS = {
     "bool", "map", "chan", "struct", "interface",
 }  # fmt: skip
 MAX_API_SYMBOLS = 300
+
+# ---- Relationship extraction beyond imports (all syntax-only, resolved against the inventory).
+SCRIPT_EXTENSIONS = (".sh", ".bash", ".bat", ".py", ".js", ".ts")
+_PATH_EXTENSIONS = (
+    "env|properties|json|ya?ml|toml|ini|cfg|conf|xml|sql|sh|bash|bat|py|js|ts|pem|key|crt|cer|"
+    "jks|p12|txt|csv|html|tpl|template|gradle|kts|mod"
+)
+# A path-looking token: optional ./ or ../ or / prefix, path segments, and a known extension, or a
+# Dockerfile name. Tokens are only ever linked when they resolve to a file in the inventory.
+_PATH_TOKEN = re.compile(
+    r"(?<![\w/.:@-])((?:\.{1,2}/|/)?(?:[\w.-]+/)*"
+    rf"(?:[\w-][\w.-]*\.(?:{_PATH_EXTENSIONS})|Dockerfile(?:\.[\w-]+)?))(?![\w/-])"
+)
+_QUOTED = re.compile(r"\"([^\"\n]{3,200})\"|'([^'\n]{3,200})'")
+_EXEC_LINE = re.compile(
+    r"^\s*(?:RUN|CMD|ENTRYPOINT)\b|\b(?:run|command|entrypoint|script)\s*:", re.I
+)
+MAX_PATH_REFERENCES = 40
+MAX_PATH_SCAN_BYTES = 200_000
+MAX_CALL_TARGETS = 8
+_JS_IMPORT_NAMES = re.compile(
+    r"import\s+(?:(\w+)\s*,?\s*)?(?:\{([^}]*)\}\s*)?(?:\*\s+as\s+(\w+)\s*)?from\s*['\"](\.[^'\"]+)['\"]"
+    r"|(?:const|let|var)\s+(?:(\w+)|\{([^}]*)\})\s*=\s*require\(\s*['\"](\.[^'\"]+)['\"]\s*\)"
+)
+_GO_IMPORT_ALIASED = re.compile(
+    r'(?m)^[ \t]*(?:import[ \t]+)?(?:([\w.]+)[ \t]+)?"([^"]+)"[ \t]*\r?$'
+)
+_GO_FUNC = re.compile(r"(?m)^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*[(\[]")
+
+
+def _path_references(
+    path: PurePosixPath, text: str, source_code: bool
+) -> list[tuple[str, str, int]]:
+    """Path-like tokens that may name another repository file (config, script, data, key).
+
+    In source code only string literals are considered, so attribute chains such as
+    `request.json` are never mistaken for files.
+    """
+    if len(text) > MAX_PATH_SCAN_BYTES:
+        return []
+    shell = path.suffix.lower() in {".sh", ".bash", ".bat"}
+    found: dict[str, tuple[str, int]] = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        if "://" in line and source_code:
+            line = re.sub(r"\w+://\S+", " ", line)
+        chunks = (
+            [group for match in _QUOTED.finditer(line) for group in match.groups() if group]
+            if source_code
+            else [re.sub(r"\w+://\S+", " ", line)]
+        )
+        executes = shell or bool(_EXEC_LINE.search(line))
+        for chunk in chunks:
+            for match in _PATH_TOKEN.finditer(chunk):
+                token = match.group(1)
+                kind = "exec_ref" if executes and token.endswith(SCRIPT_EXTENSIONS) else "path_ref"
+                found.setdefault(token, (kind, number))
+        if len(found) >= MAX_PATH_REFERENCES:
+            break
+    return [(token, kind, number) for token, (kind, number) in found.items()]
+
+
+def _js_call_references(text: str) -> list[tuple[str, str, int]]:
+    """Relative JS/TS imports whose imported names are actually used (called or rendered)."""
+    lines = text.splitlines()
+    refs: list[tuple[str, str, int]] = []
+    for match in _JS_IMPORT_NAMES.finditer(text):
+        default, named, namespace, module, required, destructured, required_module = match.groups()
+        target = module or required_module
+        names = [name for name in (default, namespace, required) if name]
+        for group in (named, destructured):
+            for part in (group or "").split(","):
+                name = re.split(r"\s+as\s+|\s*:\s*", part.strip())[-1].strip()
+                if re.fullmatch(r"[A-Za-z_$][\w$]*", name or ""):
+                    names.append(name)
+        for name in names:
+            usage = re.compile(rf"(?<![\w.$]){re.escape(name)}\s*[.(]|<{re.escape(name)}[\s/>]")
+            line = next(
+                (
+                    number
+                    for number, content in enumerate(lines, 1)
+                    if usage.search(content)
+                    and not re.search(r"\bimport\b|\brequire\s*\(", content)
+                ),
+                None,
+            )
+            if line is not None:
+                refs.append((target, "js_call", line))
+                break
+    return refs
+
+
+def _java_call_references(text: str, imports: list[tuple[str, int]]) -> list[tuple[str, str, int]]:
+    """Imported types that are constructed, called statically, or called through a variable."""
+    refs: list[tuple[str, str, int]] = []
+    for qualified, _ in imports:
+        name = re.escape(qualified.rsplit(".", 1)[-1])
+        patterns = [rf"\bnew\s+{name}\s*[(<]", rf"(?<![\w.]){name}\s*\.\s*\w+\s*\("]
+        for variable in set(
+            re.findall(rf"(?<![\w.]){name}(?:<[^>;()]*>)?\s+([a-z_]\w*)\s*[;=,)]", text)
+        ):
+            patterns.append(rf"(?<![\w.]){re.escape(variable)}\s*\.\s*\w+\s*\(")
+        offsets = [found.start() for pattern in patterns if (found := re.search(pattern, text))]
+        if offsets:
+            refs.append((qualified, "java_call", _line_of(text, min(offsets))))
+    return refs
+
+
 BINARY_EXTENSIONS = {".db", ".sqlite", ".sqlite3", ".png", ".jpg", ".jpeg", ".gif", ".pdf"}
 SOURCE_LANGUAGES = {
     ".py": "python",
@@ -167,6 +274,8 @@ class _PythonFacts(ast.NodeVisitor):
         # Local name -> module reference it binds (`from . import views` binds views -> ".views").
         self.aliases: dict[str, str] = {}
         self.calls: set[str] = set()
+        # Imported module reference -> first line where something from it is called.
+        self.call_refs: dict[str, int] = {}
         self.strings: set[str] = set()
         self.routes: list[str] = []
         self.route_paths: set[str] = set()
@@ -245,6 +354,9 @@ class _PythonFacts(ast.NodeVisitor):
         name = _call_name(node.func)
         if name:
             self.calls.add(name)
+            imported = self.aliases.get(name.split(".")[0])
+            if imported:
+                self.call_refs.setdefault(imported, node.lineno)
             for keyword in node.keywords:
                 if (
                     keyword.arg == "verify"
@@ -413,6 +525,7 @@ def _parse_python(text: str) -> _ParseFacts:
         if handler and handler in visitor.aliases:
             refs.append((visitor.aliases[handler], "python_route", line))
     refs.extend((module, "python_route", line) for module, line in visitor.included_urlconfs)
+    refs.extend((module, "python_call", line) for module, line in visitor.call_refs.items())
     return _ParseFacts(features=features, references=refs)
 
 
@@ -422,6 +535,16 @@ def _parse_java(text: str) -> _ParseFacts:
         static, name, wildcard = match.groups()
         kind = "java_static_import" if static else "java_import"
         refs.append((f"{name}.*" if wildcard else name, kind, _line_of(text, match.start())))
+    refs.extend(
+        _java_call_references(
+            text,
+            [
+                (name, line)
+                for name, kind, line in refs
+                if kind == "java_import" and "*" not in name
+            ],
+        )
+    )
     mappings = list(_JAVA_MAPPING.finditer(text))
     route_paths = {
         literal
@@ -450,6 +573,16 @@ def _parse_go(text: str) -> _ParseFacts:
             )
     for match in _GO_IMPORT_SINGLE.finditer(text):
         refs.append((match.group(1), "go_import", _line_of(text, match.start())))
+    for match in _GO_IMPORT_ALIASED.finditer(text):
+        alias, package = match.groups()
+        alias = alias if alias and alias not in {"_", "."} else package.rsplit("/", 1)[-1]
+        called: dict[str, int] = {}
+        for call in re.finditer(rf"(?<![\w.]){re.escape(alias)}\.([A-Z]\w*)\s*\(", text):
+            called.setdefault(call.group(1), _line_of(text, call.start()))
+        refs.extend(
+            (f"{package}#{function}", "go_call", line)
+            for function, line in list(called.items())[:MAX_CALL_TARGETS]
+        )
     routes = list(_GO_ROUTE.finditer(text))
     route_paths = {match.group(2) for match in routes}
     symbols = set(_call_symbols(text)) | {match.group(1) for match in _GO_COMPOSITE.finditer(text)}
@@ -459,6 +592,7 @@ def _parse_go(text: str) -> _ParseFacts:
         "route_decorators": sorted({match.group(1) for match in routes}),
         "route_paths": sorted(route_paths)[:100],
         "route_params": _route_params(route_paths),
+        "go_funcs": sorted(set(_GO_FUNC.findall(text)))[:400],
         "tls_verification_disabled": bool(re.search(r"InsecureSkipVerify\s*:\s*true", text)),
         "request_body_binding": bool(
             re.search(
@@ -472,6 +606,25 @@ def _parse_go(text: str) -> _ParseFacts:
 
 
 def _parse_text(path: PurePosixPath, text: str, language: str | None) -> _ParseFacts:
+    facts = _parse_language(path, text, language)
+    node_type, _ = _classify(path)
+    lockfile = path.name.lower().endswith((".lock", "-lock.json", "-lock.yaml", ".sum"))
+    if (
+        facts.parse_error is None
+        and not lockfile
+        and node_type
+        not in {
+            AssetType.DOCUMENTATION_FILE,
+            AssetType.DATA_FILE,
+        }
+    ):
+        facts.references.extend(
+            _path_references(path, text, source_code=node_type is AssetType.SOURCE_FILE)
+        )
+    return facts
+
+
+def _parse_language(path: PurePosixPath, text: str, language: str | None) -> _ParseFacts:
     if language == "python":
         return _parse_python(text)
     if language == "java":
@@ -489,6 +642,7 @@ def _parse_text(path: PurePosixPath, text: str, language: str | None) -> _ParseF
                 r"(?:from\s+|require\(|import\s*\()\s*['\"]([^'\"]+)['\"]", line
             ):
                 refs.append((match.group(1), "js_import", line_no))
+        refs.extend(_js_call_references(text))
         features["api_symbols"] = sorted(
             set(re.findall(r"\b(?:exec|query|deserialize|fetch|readFile|writeFile)\b", text))
         )
@@ -525,7 +679,11 @@ PYTHON_PROJECT_MARKERS = (
     "pyproject.toml",
     "requirements.txt",
 )
+CALL_KINDS = {"python_call", "java_call", "go_call", "js_call"}
+PATH_KINDS = {"path_ref", "exec_ref"}
 EDGE_CONFIDENCE: dict[str, Literal["high", "medium", "low"]] = {
+    "static_path_reference": "medium",
+    "static_suffix_reference": "low",
     "static_module_resolution": "high",
     "java_package_resolution": "high",
     "static_module_resolution_ancestor_root": "medium",
@@ -557,6 +715,12 @@ class _Resolver:
                 self.java_prefixes.update(f"{left}/{right}" for left, right in pairwise(parts[:-1]))
             elif path.endswith(".go") and not path.endswith("_test.go"):
                 self.go_files[posixpath.dirname(path)].append(path)
+        self.by_basename: dict[str, list[str]] = defaultdict(list)
+        for path in sorted(paths):
+            self.by_basename[posixpath.basename(path)].append(path)
+        self.go_funcs = {
+            path: set(parsed.features.get("go_funcs", ())) for path, parsed in facts.items()
+        }
         self.go_modules = sorted(
             (
                 (str(parsed.features["go_module"]), posixpath.dirname(path))
@@ -575,7 +739,56 @@ class _Resolver:
             return self._java(source, reference, kind)
         if kind == "go_import":
             return self._go(reference)
+        if kind in CALL_KINDS:
+            # A call is only an edge when its import resolves to a repository file; anything
+            # else (library calls) is dropped without an unresolved record.
+            if kind == "python_call":
+                targets, _ = self._python(source, reference, "python_route")
+            elif kind == "js_call":
+                targets, _ = self._javascript(source, reference)
+            elif kind == "java_call":
+                targets, _ = self._java(source, reference, "java_import")
+            else:
+                package, _, function = reference.partition("#")
+                files, _ = self._go(package)
+                targets = tuple(path for path in files if function in self.go_funcs.get(path, ()))
+            return (targets, "static_call_resolution") if targets else ((), "unresolved_member")
+        if kind in PATH_KINDS:
+            return self._path(source, reference)
         return (), "unsupported_reference_kind"
+
+    def _path(self, source: str, reference: str) -> tuple[tuple[str, ...], str]:
+        """Resolve a path-like token to exactly one inventoried file, or to nothing."""
+        token = reference[2:] if reference.startswith("./") else reference
+        source_dir = posixpath.dirname(source)
+        if not reference.startswith("/"):
+            directory = source_dir
+            while True:
+                candidate = _normalize(posixpath.join(directory, token))
+                if candidate in self.paths and candidate != source:
+                    return (candidate,), "static_path_reference"
+                if not directory:
+                    break
+                directory = posixpath.dirname(directory)
+        # Otherwise accept only an unambiguous suffix match inside the same component
+        # (for example an absolute container path such as /app/certs/server.key).
+        parts = source.split("/")
+        component = "/".join(parts[:2]) + "/" if parts[0] == "services" and len(parts) > 2 else ""
+        segments = [part for part in token.split("/") if part not in {"", ".", ".."}]
+        for size in range(len(segments), 0, -1):
+            suffix = "/".join(segments[-size:])
+            matches = [
+                path
+                for path in self.by_basename.get(segments[-1], ())
+                if path.startswith(component)
+                and path != source
+                and (path == suffix or path.endswith("/" + suffix))
+            ]
+            if len(matches) == 1:
+                return (matches[0],), "static_suffix_reference"
+            if matches and size == 1:
+                break
+        return (), "unresolved_member"
 
     @staticmethod
     def _python_candidates(base: str, module: str) -> list[str]:
@@ -682,6 +895,17 @@ class _Resolver:
                 return files, "go_package_directory"
             return (), "unresolved_local_reference"
         return (), "external_reference"
+
+
+def _path_edge_type(kind: str, target: Asset) -> EdgeType:
+    """Relationship type for a resolved path reference, from what the target file is."""
+    if kind == "exec_ref" and target.path.endswith(SCRIPT_EXTENSIONS):
+        return EdgeType.EXECUTES
+    if target.node_type in {AssetType.CONFIG_FILE, AssetType.MANIFEST_FILE}:
+        return EdgeType.LOADS_CONFIG
+    if target.node_type in {AssetType.SOURCE_FILE, AssetType.INFRA_FILE, AssetType.WORKFLOW_FILE}:
+        return EdgeType.REFERENCES
+    return EdgeType.READS
 
 
 class RepositoryExtractor:
@@ -871,8 +1095,26 @@ class RepositoryExtractor:
                     )
                     continue
                 edge_type = EdgeType.ROUTES_TO if kind == "python_route" else EdgeType.IMPORTS
-                evidence_id = _stable_id("ev", snapshot.snapshot_id, source_path, line, reference)
-                if kind == "python_route":
+                if kind in CALL_KINDS:
+                    edge_type = EdgeType.CALLS_IN
+                elif kind in PATH_KINDS:
+                    edge_type = _path_edge_type(kind, path_to_asset[targets[0]])
+                evidence_id = (
+                    _stable_id("ev", snapshot.snapshot_id, source_path, line, reference, kind)
+                    if kind in CALL_KINDS | PATH_KINDS
+                    else _stable_id("ev", snapshot.snapshot_id, source_path, line, reference)
+                )
+                if kind in CALL_KINDS:
+                    summary = (
+                        f"Code at this line calls into {reference!r}, which resolves to "
+                        f"{', '.join(targets)}"
+                    )
+                elif kind in PATH_KINDS:
+                    summary = (
+                        f"Path {reference!r} at this line resolves to {targets[0]} "
+                        f"({edge_type.value.lower().replace('_', ' ')}; {method})"
+                    )
+                elif kind == "python_route":
                     summary = f"Static URL route handler {reference!r} resolves to {targets[0]}"
                 elif kind == "go_import":
                     summary = (

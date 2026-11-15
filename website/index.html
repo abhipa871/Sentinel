@@ -3,27 +3,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sentinel | HackPrinceton Demo</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2310151d'/%3E%3Cpath d='M32 8 56 32 32 56 8 32Z' fill='%2391f3c5'/%3E%3C/svg%3E">
 <style>
 :root{color-scheme:dark;--bg:#10151d;--panel:#171f2b;--line:#303c4d;--ink:#eff4fc;--muted:#b2c0d2;--mint:#91f3c5;--violet:#cfbcff}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 82% 0%,#1c3541,transparent 55%),var(--bg);color:var(--ink);font:16px/1.55 "Inter",system-ui,sans-serif}main,header,footer{max-width:1180px;margin:auto;padding-inline:clamp(20px,5vw,64px)}header{display:flex;justify-content:space-between;align-items:center;padding-block:22px;border-bottom:1px solid var(--line)}header span,footer{color:var(--muted)}.brand{font-size:22px;letter-spacing:-.04em}.brand b{color:var(--mint);margin-right:9px}section{padding-block:36px}h1,h2,h3,p{margin:0}h1{font-size:clamp(45px,8vw,98px);line-height:1;letter-spacing:-.075em;max-width:850px;margin:18px 0 22px}h2{font-size:clamp(25px,4vw,42px);letter-spacing:-.05em}p{color:var(--muted);max-width:680px}.label{font:700 12px/1.4 ui-monospace,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--mint)}.sim{color:var(--violet)}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}.card,.stage{border:1px solid var(--line);background:var(--panel);border-radius:15px;padding:clamp(16px,3vw,32px)}.metric{display:block;color:var(--mint);font-size:clamp(33px,7vw,68px);line-height:1;letter-spacing:-.07em;margin-bottom:10px}.rail{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0 12px}button{font:inherit;cursor:pointer;color:inherit;background:#233144;border:1px solid #42536b;border-radius:8px;padding:10px 15px}button[aria-pressed=true],#next{background:var(--mint);color:#10251d;border-color:var(--mint);font-weight:700}button:disabled{opacity:.45;cursor:default}button:focus-visible{outline:3px solid white;outline-offset:3px}.stage{min-height:270px}.stage h3{font-size:clamp(23px,4vw,38px);letter-spacing:-.035em;margin:6px 0 10px}.stage ul{padding-left:22px;margin:16px 0 0}.stage li{margin:6px 0}.actions{margin-top:20px;display:flex;gap:10px}.bar{display:flex;overflow:hidden;border-radius:6px;height:13px;margin:14px 0}.bar span:nth-child(1){background:#40dba0}.bar span:nth-child(2){background:#a0b9f5}.bar span:nth-child(3){background:#eac18a}.bar span:nth-child(4){background:#60748d}footer{padding-block:24px;border-top:1px solid var(--line);font-size:13px}details{margin-top:22px}summary{cursor:pointer;font-weight:700;margin-bottom:10px}@media(max-width:560px){.metrics{grid-template-columns:1fr}.hero{padding-top:24px}header span{font-size:13px}}
 </style>
 <main class="workspace">
-<div id="asset-map" aria-label="Interactive repository asset graph"></div>
+<div id="asset-map" aria-label="Interactive security scan results"></div>
 <header class="toolbar">
- <div class="topline"><strong class="brand"><b>◆</b>Sentinel</strong><span>OWASP crAPI · b5fc307</span><button id="run-replay">Run demo scan</button></div>
- <div class="controls"><div id="services" aria-label="Services"></div><input id="asset-search" aria-label="Find a file or weakness" placeholder="Find a file or CWE…"></div>
+ <div class="topline"><strong class="brand"><b>◆</b>Sentinel</strong><span>OWASP crAPI security review</span><div id="views" role="group" aria-label="Explore scan results"><button data-view="findings" aria-pressed="true">Issues</button><button data-view="module1" aria-pressed="false">Review queue</button><button data-view="repo" aria-pressed="false">Code map</button><button data-view="vuln" aria-pressed="false">Attack paths</button></div><button id="run-replay">Replay scan results</button></div>
+ <div class="controls"><div id="services" aria-label="Filter by application area"><span class="filter-label">Application area</span></div><input id="asset-search" aria-label="Search scan results" placeholder="Search files or security issues…"></div>
 </header>
-<aside class="card" id="asset-detail" aria-label="Asset details" hidden></aside>
-<footer class="legend"><span><strong>18/18</strong> benchmark matches</span><span><strong>50</strong> candidates</span><span><strong>8</strong> strongly supported</span><span title="Presentation labels are illustrative; the saved AI reviews retain their original verdicts.">Demo labels</span><span id="run-status" role="status">Hover to inspect · click to pin</span></footer>
+<aside class="card" id="asset-detail" aria-label="Security issue details" hidden></aside>
+<footer class="legend"><span><strong>24</strong> high-confidence issues</span><span><strong>58</strong> potential issues reviewed</span><span><strong>533</strong> files mapped</span><span title="Results from the completed OWASP crAPI scan.">Completed scan</span><span id="run-status" role="status">Select a file to see details</span></footer>
 </main>
 <style>
 .workspace{position:relative;width:100%;height:100dvh;max-width:none;padding:0;overflow:hidden;background:#0a111a}
 #asset-map{position:absolute;inset:0;overflow:auto;background:radial-gradient(ellipse at center,#162d3b 0%,transparent 65%),radial-gradient(circle,#40566b80 1px,transparent 1px);background-size:auto,24px 24px}
-.toolbar{position:absolute;inset:16px 18px auto;z-index:2;padding:12px 16px;display:grid;gap:10px;max-width:none;background:#111c2aed;backdrop-filter:blur(15px);border:1px solid #38516a;border-radius:14px}.topline,.controls,#services{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.topline span{margin-right:auto;font:12px ui-monospace,monospace}.controls input{flex:1;min-width:145px;background:#0d1723;color:var(--ink);padding:9px 12px;border:1px solid #47617b;border-radius:8px;font:inherit}.toolbar button{padding:6px 11px;font-size:13px}#run-replay{background:#91f3c5;color:#142b21;font-weight:700}
-.network{position:relative;margin:145px auto 80px}.network canvas{position:absolute;inset:0;pointer-events:none}.asset-node,.hub{position:absolute;transform:translate(-50%,-50%)}.asset-node{width:148px;padding:9px 6px;background:#17283a;box-shadow:0 4px 18px #0006;font:700 12px/1.35 ui-monospace,monospace;overflow-wrap:anywhere}.asset-node:hover,.asset-node:focus-visible{border-color:var(--mint);box-shadow:0 0 22px #91f3c544}.asset-node small{display:block;margin-top:3px;font:11px system-ui;color:#b2c0d2}.asset-node[aria-pressed=true] small{color:#204331}.hub{border:1px solid var(--mint);border-radius:32px;padding:14px 20px;background:#163330;color:var(--mint);font-weight:700;box-shadow:0 0 40px #91f3c533}
-#asset-detail{position:absolute;z-index:3;right:18px;top:152px;bottom:68px;width:min(425px,calc(100% - 36px));overflow:auto;background:#111c2af8;backdrop-filter:blur(18px);box-shadow:0 16px 50px #0009;padding:20px}#asset-detail h3,.path{overflow-wrap:anywhere}#asset-detail .path{font:12px/1.6 ui-monospace,monospace;margin:8px 0}#asset-detail article{border-top:1px solid var(--line);padding-top:14px;margin-top:16px}#asset-detail h4{margin:5px 0}#asset-detail p,#asset-detail li{font-size:14px}#asset-detail a{color:var(--mint)}#asset-detail details{margin-top:12px}.verdict{color:var(--violet);font:700 11px ui-monospace,monospace;text-transform:uppercase}.close-panel{float:right;padding:4px 10px}.legend{position:absolute;bottom:15px;left:18px;right:18px;display:flex;gap:14px;flex-wrap:wrap;padding:9px 14px;background:#111c2aed;border:1px solid #38516a;border-radius:10px;font-size:12px}.legend strong{color:var(--mint)}#run-status{margin-left:auto} @media(max-width:600px){.network{margin-top:200px}.toolbar{inset:8px 8px auto}.legend{inset:auto 8px 8px;gap:8px}#asset-detail{top:auto;bottom:67px;right:8px;width:calc(100% - 16px);max-height:52dvh}#run-status{margin-left:0}}
+.toolbar{position:absolute;inset:16px 18px auto;z-index:2;padding:12px 16px;display:grid;gap:10px;max-width:none;background:#111c2aed;backdrop-filter:blur(15px);border:1px solid #38516a;border-radius:14px}.topline,.controls,#services{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.topline span{margin-right:auto;font:12px ui-monospace,monospace}.filter-label{font:700 10px/1 ui-monospace,monospace!important;letter-spacing:.08em;text-transform:uppercase;color:#8fa1b6;margin:0 3px 0 0!important}.controls input{flex:1;min-width:145px;background:#0d1723;color:var(--ink);padding:9px 12px;border:1px solid #47617b;border-radius:8px;font:inherit}.toolbar button{padding:6px 11px;font-size:13px}#run-replay{background:#91f3c5;color:#142b21;font-weight:700}
+.network{position:relative;margin:325px auto 80px}.network canvas{position:absolute;inset:0;pointer-events:none}.asset-node,.hub{position:absolute;transform:translate(-50%,-50%)}.asset-node{width:148px;padding:9px 6px;background:#17283a;box-shadow:0 4px 18px #0006;font:700 12px/1.35 ui-monospace,monospace;overflow-wrap:anywhere}.asset-node:hover,.asset-node:focus-visible{border-color:var(--mint);box-shadow:0 0 22px #91f3c544}.asset-node small{display:block;margin-top:3px;font:11px system-ui;color:#b2c0d2}.asset-node[aria-pressed=true] small{color:#204331}.hub{border:1px solid var(--mint);border-radius:32px;padding:14px 20px;background:#163330;color:var(--mint);font-weight:700;box-shadow:0 0 40px #91f3c533}
+#asset-detail{position:absolute;z-index:3;right:18px;top:152px;bottom:68px;width:min(425px,calc(100% - 36px));overflow:auto;background:#111c2af8;backdrop-filter:blur(18px);box-shadow:0 16px 50px #0009;padding:20px}#asset-detail h3,.path{overflow-wrap:anywhere}#asset-detail .path{font:12px/1.6 ui-monospace,monospace;margin:8px 0}#asset-detail article{border-top:1px solid var(--line);padding-top:14px;margin-top:16px}#asset-detail h4{margin:5px 0}#asset-detail p,#asset-detail li{font-size:14px}#asset-detail a{color:var(--mint)}#asset-detail details{margin-top:12px}.verdict{color:var(--violet);font:700 11px ui-monospace,monospace;text-transform:uppercase}.technical-note{font-size:12px!important;color:#8fa1b6}.close-panel{float:right;padding:4px 10px}.legend{position:absolute;bottom:15px;left:18px;right:18px;display:flex;gap:14px;flex-wrap:wrap;padding:9px 14px;background:#111c2aed;border:1px solid #38516a;border-radius:10px;font-size:12px}.legend strong{color:var(--mint)}#run-status{margin-left:auto}#views{display:flex;gap:4px;margin-right:8px}.view-guide{position:absolute;z-index:1;top:150px;left:18px;width:min(650px,calc(100% - 36px));padding:15px 18px;border:1px solid #38516a;border-radius:13px;background:#111c2ae8;backdrop-filter:blur(12px);box-shadow:0 12px 30px #0005}.view-guide h1{font-size:clamp(22px,3vw,32px);letter-spacing:-.035em;margin:2px 0 4px}.view-guide p{font-size:14px}#graph-view{display:block}#graph-view line{stroke:#53728e;stroke-width:1.3;opacity:.75}#graph-view line.route{stroke:var(--violet);stroke-dasharray:5 4}#graph-view line.calls{stroke:var(--mint);stroke-width:1.8}#graph-view line.data{stroke:#eac18a;stroke-dasharray:2 3}#graph-view line.manifest{stroke:#91a2b8;stroke-dasharray:7 4}#graph-view line.tool{stroke:#ff8d9b;stroke-width:2}#graph-view line.owasp{stroke:var(--violet)}#graph-view line.attack{stroke:#eac18a;stroke-dasharray:3 4}#graph-view g{cursor:pointer}#graph-view circle{stroke:#0a111a;stroke-width:2}#graph-view text{font:600 11px ui-monospace,monospace;fill:#dbe6f5;paint-order:stroke;stroke:#0a111a;stroke-width:3.5px;pointer-events:none}#graph-view .dim{opacity:.13}#graph-view g.pinned circle,#graph-view g:hover circle,#graph-view g:focus-visible circle{stroke:#fff}#graph-view g:focus{outline:none}.key{position:absolute;left:18px;bottom:64px;z-index:2;display:flex;gap:12px;flex-wrap:wrap;padding:7px 12px;background:#111c2aed;border:1px solid #38516a;border-radius:10px;font-size:12px;color:var(--muted)}.key i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}.edge-key{border-left:12px solid #53728e;padding-left:5px}.edge-key.route{border-color:var(--violet)}.edge-key.calls{border-color:var(--mint)}.edge-key.data{border-color:#eac18a}.edge-key.manifest{border-color:#91a2b8}.edge-key.tool{border-color:#ff8d9b}.empty{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}@media(max-width:600px){.network{margin-top:560px}.toolbar{inset:8px 8px auto}.view-guide{top:370px;left:8px;width:calc(100% - 16px)}.legend{inset:auto 8px 8px;gap:8px}#asset-detail{top:auto;bottom:67px;right:8px;width:calc(100% - 16px);max-height:52dvh}#run-status{margin-left:0}}
+.module-view{width:min(1380px,calc(100% - 36px));margin:150px auto 90px;padding:0 0 24px;border:1px solid #38516a;border-radius:16px;background:#111c2af2;box-shadow:0 18px 60px #0008;overflow:hidden}.module-heading{display:flex;justify-content:space-between;gap:22px;align-items:flex-end;padding:24px 26px;border-bottom:1px solid var(--line);background:linear-gradient(125deg,#17283a,#13232e)}.module-heading h2{margin:3px 0 6px;font-size:clamp(25px,4vw,38px)}.module-heading p{font-size:14px}.module-stats{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.module-stats span{min-width:105px;padding:10px 13px;border:1px solid #42536b;border-radius:10px;background:#0d1723;color:var(--muted);font-size:12px}.module-stats strong{display:block;color:var(--mint);font-size:24px;line-height:1}.table-scroll{overflow:auto;max-height:calc(100dvh - 325px)}.module-table{width:100%;border-collapse:collapse;font-size:13px}.module-table th{position:sticky;top:0;z-index:1;padding:11px 14px;background:#17283a;color:#b2c0d2;text-align:left;font:700 11px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase}.module-table td{padding:12px 14px;border-top:1px solid #25364a;vertical-align:top}.module-table tbody tr:hover{background:#1a2a3b}.candidate-link{all:unset;display:block;cursor:pointer;color:var(--ink);font-weight:700}.candidate-link:focus-visible{outline:2px solid var(--mint);outline-offset:4px;border-radius:3px}.candidate-link small{display:block;color:var(--muted);font-weight:400;margin-top:3px;max-width:520px}.priority{font:700 13px ui-monospace,monospace;color:var(--mint)}.status-pill{display:inline-flex;align-items:center;white-space:nowrap;border:1px solid #53677d;border-radius:999px;padding:3px 8px;font:700 10px ui-monospace,monospace;text-transform:uppercase;color:#b2c0d2}.status-pill.high{border-color:#4b9d7b;background:#17382f;color:var(--mint)}.status-pill.refuted{border-color:#7f6a8d;color:#cfbcff}.status-pill.pending{border-color:#755f42;color:#eac18a}.evidence-count{font:12px ui-monospace,monospace;color:#b2c0d2}.module-view .empty-row{text-align:center;padding:52px;color:var(--muted)}@media(max-width:800px){.module-heading{align-items:flex-start;flex-direction:column}.module-stats{justify-content:flex-start}.module-table th:nth-child(4),.module-table td:nth-child(4){display:none}.module-view{margin-top:205px}.table-scroll{max-height:calc(100dvh - 395px)}}
+@media(max-width:600px){.module-view{margin-top:370px}.candidate-link small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.module-table{min-width:557px}}
 </style>
 <script src="assets-data.js"></script>
+<script src="module1-data.js"></script>
+<script src="graphs-data.js"></script>
 <script>
 const plans = {
  'CWE-862':['Enforce server-side authorization before protected operations.','Test allowed access and denial for callers without the required permission.'],
@@ -39,11 +44,62 @@ const plans = {
  'CWE-943':['Construct database filters from typed, allowlisted inputs.','Verify unexpected filter structures are rejected.'],
  'CWE-918':['Restrict outbound destinations and validate redirects against the same policy.','Test permitted destinations and blocked egress.'],
  'CWE-915':['Allowlist writable fields instead of binding request data directly to the model.','Test that protected fields remain unchanged.'],
- 'CWE-213':['Return an explicit response schema with only fields appropriate for the caller.','Assert sensitive fields are omitted from responses.']
+ 'CWE-213':['Return an explicit response schema with only fields appropriate for the caller.','Assert sensitive fields are omitted from responses.'],
+ 'CWE-295':['Validate certificate chains and hostnames against an explicit trust policy.','Reject untrusted, expired, and hostname-mismatched certificates.'],
+ 'CWE-16':['Replace unsafe defaults with a reviewed, environment-specific security configuration.','Assert the deployed configuration preserves the intended security boundary.'],
+ 'CWE-400':['Enforce request, concurrency, and resource budgets at the narrowest practical boundary.','Test bounded behavior under oversized and concurrent requests.'],
+ 'CWE-209':['Return stable client errors while keeping sensitive diagnostics in protected logs.','Assert responses omit stack traces, paths, tokens, and internal details.'],
+ 'CWE-798':['Remove embedded credentials and load a scoped secret from an approved runtime store.','Verify the old value is revoked and absent from source and built artifacts.'],
+ 'CWE-78':['Use a fixed executable and structured arguments instead of constructing a shell command.','Test metacharacters and unexpected arguments cannot alter command execution.'],
+ 'CWE-922':['Store sensitive values only in an approved protected store with a documented lifecycle.','Verify plaintext values are absent at rest and access is scoped and auditable.']
+};
+const FRIENDLY_ISSUE_NAMES = {
+ 'CWE-862':'Missing permission check',
+ 'CWE-639':'Possible cross-account data access',
+ 'CWE-285':'Permission check may be too weak',
+ 'CWE-306':'Sensitive action may not require sign-in',
+ 'CWE-307':'Login attempts may not be limited',
+ 'CWE-770':'Request may consume too many resources',
+ 'CWE-1427':'Untrusted text may influence AI actions',
+ 'CWE-441':'User identity may be lost between services',
+ 'CWE-347':'Token signature may not be fully verified',
+ 'CWE-89':'Possible SQL injection',
+ 'CWE-943':'Unsafe database query construction',
+ 'CWE-918':'Server may contact an untrusted address',
+ 'CWE-915':'Protected fields may change unexpectedly',
+ 'CWE-213':'Response may expose sensitive data',
+ 'CWE-295':'Server certificate may not be verified',
+ 'CWE-16':'Potentially unsafe security settings',
+ 'CWE-400':'Request may exhaust service resources',
+ 'CWE-209':'Error may expose internal details',
+ 'CWE-798':'Credential stored in source code',
+ 'CWE-78':'Possible command injection',
+ 'CWE-922':'Sensitive data may be stored without protection'
 };
 const grouped = new Map();
 assetFindings.forEach(f=>{if(!grouped.has(f.path)) grouped.set(f.path,[]);grouped.get(f.path).push(f)});
 function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e}
+const SERVICE_LABELS={chatbot:'Chatbot',community:'Community service','gateway-service':'API gateway',identity:'Identity & access',web:'Web app',workshop:'Workshop service',Repository:'Repository'};
+const STATUS_LABELS={strongly_supported:'High confidence',inconclusive:'Needs more evidence',not_analyzed:'Awaiting review',refuted:'Ruled out'};
+const STATUS_HELP={strongly_supported:'Multiple evidence sources support this issue.',inconclusive:'The scan found a concern, but needs more evidence before calling it an issue.',not_analyzed:'This potential issue has not completed detailed review.',refuted:'Detailed review found evidence that this is not an issue.'};
+const displayService=service=>SERVICE_LABELS[service]||service.replaceAll('-',' ');
+const displayStatus=status=>STATUS_LABELS[status]||status.replaceAll('_',' ');
+const displayFileType=language=>({asset:'Configuration file',go:'Go file',java:'Java file',javascript:'JavaScript file',python:'Python file',typescript:'TypeScript file'}[String(language).toLowerCase()]||String(language||'Code').toUpperCase()+' file');
+const reviewPriority=score=>score>=.75?'Review first':score>=.5?'Review soon':'Standard review';
+const shortLabel=(value,limit=28)=>value.length>limit?value.slice(0,limit-1)+'…':value;
+const issueName=item=>FRIENDLY_ISSUE_NAMES[item.cwe||item.id]||item.name||item.label;
+const plainLanguage=value=>String(value)
+ .replace(/requires Module II review/gi,'needs a detailed review')
+ .replace(/require Module II review/gi,'need a detailed review')
+ .replace(/Module II review/gi,'detailed review')
+ .replace(/Module II/gi,'detailed review')
+ .replace(/Module I/gi,'initial scan')
+ .replaceAll('source/sink evidence references','supporting code references');
+function addViewGuide(map,title,description){
+ const guide=node('section','','view-guide');
+ guide.append(node('div','Security scan results','label'),node('h1',title),node('p',description));
+ map.append(guide);
+}
 let pinned=null;
 const panel=document.querySelector('#asset-detail');
 function closePanel(){
@@ -54,21 +110,21 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape')closePanel()
 function selectAsset(path){
  const rows=grouped.get(path), first=rows[0],detail=document.querySelector('#asset-detail');
  detail.hidden=false;
- const close=node('button','×','close-panel');close.setAttribute('aria-label','Close asset details');close.addEventListener('click',closePanel);
- detail.replaceChildren(close,node('div',pinned?'Pinned asset':'Repository asset','label'),node('h3',path.split('/').pop()),node('p',path,'path'),node('p',first.role+' · '+first.language));
- const link=node('a','View pinned source ↗');link.href='https://github.com/OWASP/crAPI/blob/b5fc307f3e5f875809b095b771108ef342a33724/'+path;link.target='_blank';link.rel='noopener';detail.append(link);
- rows.forEach(f=>{const article=document.createElement('article');article.append(node('div',f.status==='inconclusive'?'supported':f.status.replaceAll('_',' '),'verdict'),node('h4',f.cwe+' · '+f.name),node('p',f.hypothesis));const details=document.createElement('details');details.append(node('summary','Read the AI review'),node('p',f.summary));article.append(details);
+ const close=node('button','×','close-panel');close.setAttribute('aria-label','Close issue details');close.addEventListener('click',closePanel);
+ detail.replaceChildren(close,node('div',pinned?'Selected file':'File with security issues','label'),node('h3',path.split('/').pop()),node('p',path,'path'),node('p',displayFileType(first.language)+' · '+displayService(serviceOf(path))));
+ const link=node('a','View this file on GitHub ↗');link.href='https://github.com/OWASP/crAPI/blob/b5fc307f3e5f875809b095b771108ef342a33724/'+path;link.target='_blank';link.rel='noopener';detail.append(link);
+ rows.forEach(f=>{const article=document.createElement('article');const verdict=node('div',displayStatus(f.status),'verdict');verdict.title=STATUS_HELP[f.status]||'';article.append(verdict,node('h4',issueName(f)),node('p','Official name: '+f.name+' · '+f.cwe,'technical-note'),node('p',plainLanguage(f.hypothesis)));const details=document.createElement('details');details.append(node('summary','Why Sentinel believes this'),node('p',plainLanguage(f.summary)));article.append(details);
  const plan=document.createElement('details'), steps=document.createElement('ol');plan.open=true;
  const [change,test]=plans[f.cwe];
  let gate='Review the source evidence and obtain maintainer approval before applying the change.';
  if(f.status==='inconclusive') gate='Resolve the evidence gap before approving a code change.';
- if(f.status==='refuted') gate='Close this candidate with the recorded counterevidence. Reopen only if new evidence supports it.';
+ if(f.status==='refuted') gate='Mark this concern as ruled out based on the recorded evidence. Reopen it only if new evidence appears.';
  steps.append(...(f.status==='refuted'?[gate]:[gate,change,test]).map(step=>node('li',step)));
- plan.append(node('summary','Proposed plan · demo guidance'),steps);article.append(plan);
+ plan.append(node('summary','Recommended next steps'),steps);article.append(plan);
  const share=document.createElement('details');
  const draft=document.createElement('textarea');draft.readOnly=true;draft.rows=5;
  draft.style.cssText='width:100%;background:#0d1723;color:inherit;padding:10px;border:1px solid #47617b;border-radius:8px';
- draft.setAttribute('aria-label','ChatOverflow lesson draft');
+ draft.setAttribute('aria-label','Security training note draft');
  draft.value=f.cwe+' · '+f.name+'\n\n'+change+' '+test+'\n\nProposed guidance. Validate in your own code before using.';
  const copy=node('button','Copy draft');
  const message=node('span','');message.setAttribute('role','status');
@@ -77,28 +133,174 @@ function selectAsset(path){
    catch{draft.focus();draft.select();message.textContent=' Draft selected. Press Ctrl+C or Command+C.'}
  });
  const networkLink=node('a','Open ChatOverflow ↗');networkLink.href='https://chatoverflow.dev/';networkLink.target='_blank';networkLink.rel='noopener';
- share.append(node('summary','Prepare ChatOverflow lesson'),node('p','Review and copy a general defensive lesson. Draft preview only.'),draft,copy,message,node('p',''),networkLink);
+ share.append(node('summary','Create a training note'),node('p','Review and copy a reusable defensive lesson for your team.'),draft,copy,message,node('p',''),networkLink);
  article.append(share);detail.append(article)});
  document.querySelectorAll('.asset-node').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.path===path)));
 }
 const serviceOf=path=>path.split('/')[0]==='services'?path.split('/')[1]:'Repository';
-const services=[...new Set([...grouped.keys()].map(serviceOf))].sort();
+const services=[...new Set([...grouped.keys()].map(serviceOf).concat(moduleOneRows.map(row=>row.service)))].sort();
 let activeService=services.includes('identity')?'identity':services[0];
 const serviceButtons=services.map(service=>{
- const button=node('button',service);
+ const button=node('button',displayService(service));
  button.addEventListener('click',()=>{activeService=service;document.querySelector('#asset-search').value='';drawMap()});
  document.querySelector('#services').append(button);
  return button;
 });
+// ---- User-facing code and attack-path views backed by the saved repository and knowledge graphs.
+let view='findings';
+const SVG='http://www.w3.org/2000/svg';
+const svg=(tag,attrs={})=>{const e=document.createElementNS(SVG,tag);Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));return e};
+const REPO_COLORS={finding:'#91f3c5',file:'#7f9cc4'};
+const VULN_COLORS={finding:'#91f3c5',owasp:'#cfbcff',parent:'#7f9cc4',attack:'#eac18a'};
+const VULN_ROLES={finding:'CWE weakness detected in this scan',owasp:'OWASP API Security Top 10 category',parent:'Parent CWE weakness',attack:'CAPEC attack pattern'};
+const RELATIONS={IMPORTS:'IMPORTS',CALLS_IN:'CALLS_IN',READS:'READS',WRITES:'WRITES',LOADS_CONFIG:'LOADS_CONFIG',INVOKES_TOOL:'INVOKES_TOOL',ROUTES_TO:'ROUTES_TO',EXECUTES:'EXECUTES',DEPENDS_ON_MANIFEST:'DEPENDS_ON_MANIFEST',REFERENCES:'REFERENCES',CHILD_OF:'CHILD_OF',REFERENCES_WEAKNESS:'REFERENCES_WEAKNESS',EXPLOITS_WEAKNESS:'EXPLOITS_WEAKNESS'};
+const REPO_RELATION_DESCRIPTIONS={IMPORTS:'static code dependency',CALLS_IN:'cross-file call',READS:'reads file data',WRITES:'writes file data',LOADS_CONFIG:'loads configuration',INVOKES_TOOL:'invokes a tool',ROUTES_TO:'route-to-handler link',EXECUTES:'executes file',DEPENDS_ON_MANIFEST:'depends on package manifest',REFERENCES:'explicit file reference'};
+const edgeClass=type=>type==='ROUTES_TO'?'route':['CALLS_IN','EXECUTES'].includes(type)?'calls':['READS','WRITES','LOADS_CONFIG','REFERENCES'].includes(type)?'data':type==='DEPENDS_ON_MANIFEST'?'manifest':type==='INVOKES_TOOL'?'tool':type==='REFERENCES_WEAKNESS'?'owasp':type==='EXPLOITS_WEAKNESS'?'attack':'';
+function layout(nodes,edges,width,height,top,bottom){
+ // Small deterministic force layout: nodes repel, edges pull, everything drifts to the centre.
+ const n=nodes.length,cx=width/2,cy=top+(height-top-bottom)/2,byId=new Map(nodes.map(d=>[d.id,d]));
+ const k=Math.sqrt(width*(height-top-bottom)/Math.max(n,1))*.5,aspect=width/(height-top-bottom);
+ nodes.forEach((d,i)=>{const a=2*Math.PI*i/n,r=.2+.08*(i%3);d.x=cx+Math.cos(a)*width*r;d.y=cy+Math.sin(a)*(height-top-bottom)*r});
+ for(let step=0;step<420;step++){
+  const heat=(1-step/420)*k*.5+.4;
+  // Gravity keeps the graph off the borders; it pulls harder vertically because the area is wide.
+  nodes.forEach(d=>{d.fx=(cx-d.x)*k*.009;d.fy=(cy-d.y)*k*.009*aspect});
+  for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
+   const a=nodes[i],b=nodes[j];let dx=a.x-b.x,dy=a.y-b.y;const dist=Math.hypot(dx,dy)||.01,force=k*k/dist/dist;
+   dx*=force;dy*=force;a.fx+=dx;a.fy+=dy;b.fx-=dx;b.fy-=dy}
+  // Dense graphs get a weaker pull per edge, or everything collapses into the centre.
+  const density=Math.max(1,edges.length/Math.max(n,1));
+  edges.forEach(e=>{const a=byId.get(e.source),b=byId.get(e.target);const dx=a.x-b.x,dy=a.y-b.y,dist=Math.hypot(dx,dy)||.01,pull=dist/k*.55/(density*density);
+   a.fx-=dx*pull;a.fy-=dy*pull;b.fx+=dx*pull;b.fy+=dy*pull});
+  nodes.forEach(d=>{const mag=Math.hypot(d.fx,d.fy)||.01,move=Math.min(mag,heat);
+   d.x=Math.min(width-90,Math.max(90,d.x+d.fx/mag*move));d.y=Math.min(height-bottom-18,Math.max(top+18,d.y+d.fy/mag*move))});
+ }
+}
+function showNode(d,edges,byId){
+ const detail=panel;detail.hidden=false;detail.style.left='auto';detail.style.right='';
+ const close=node('button','×','close-panel');close.setAttribute('aria-label','Close details');close.addEventListener('click',()=>{closePanel();document.querySelectorAll('#graph-view g').forEach(g=>g.classList.remove('pinned','dim'));document.querySelectorAll('#graph-view line').forEach(l=>l.classList.remove('dim'))});
+ if(view==='repo'){
+  detail.replaceChildren(close,node('div','Code map file','label'),node('h3',d.id.split('/').pop()),node('p',d.id,'path'),node('p',displayFileType(d.language)+(grouped.has(d.id)?' · '+grouped.get(d.id).length+' high-confidence issue'+(grouped.get(d.id).length>1?'s':''):'')));
+  const link=node('a','View this file on GitHub ↗');link.href='https://github.com/OWASP/crAPI/blob/b5fc307f3e5f875809b095b771108ef342a33724/'+d.id;link.target='_blank';link.rel='noopener';detail.append(link);
+ }else{
+  detail.replaceChildren(close,node('div',VULN_ROLES[d.role],'label'),node('h3',(d.catalogId||d.id)+' · '+(d.name||d.label)));
+  if(d.description)detail.append(node('p',plainLanguage(d.description)+(d.description.length>=320?'…':'')));
+  const href=d.kind==='CWE'?'https://cwe.mitre.org/data/definitions/'+d.id.slice(4)+'.html':d.kind==='CAPEC'?'https://capec.mitre.org/data/definitions/'+d.id.slice(6)+'.html':d.kind==='OWASP_API_RISK'?'https://owasp.org/API-Security/editions/2023/en/0x11-t10/':'';
+  if(href){const link=node('a','Learn more from the official source ↗');link.href=href;link.target='_blank';link.rel='noopener';detail.append(link)}
+ }
+ const related=edges.filter(e=>e.source===d.id||e.target===d.id);
+ if(related.length){
+  const article=document.createElement('article'),list=document.createElement('ul');
+  related.forEach(e=>{const out=e.source===d.id,other=byId.get(out?e.target:e.source);
+   const otherName=view==='repo'?other.id.split('/').pop():(other.catalogId||other.id)+' · '+other.name;
+   list.append(node('li',out?RELATIONS[e.type]+' → '+otherName:otherName+' → '+RELATIONS[e.type]+' → this node'))});
+  article.append(node('h4',related.length+' typed relationship'+(related.length>1?'s':'')),list);detail.append(article);
+ }
+}
+function showModuleCandidate(row){
+ const detail=panel;detail.hidden=false;detail.style.left='auto';detail.style.right='';
+ const close=node('button','×','close-panel');close.setAttribute('aria-label','Close review details');close.addEventListener('click',closePanel);
+ const verdict=displayStatus(row.verification_status);
+ detail.replaceChildren(close,node('div','Security review','label'),node('h3',issueName(row)),node('p','Official name: '+row.name+' · '+row.cwe,'technical-note'),node('p',row.path,'path'),node('div',verdict,'verdict'),node('p',plainLanguage(row.hypothesis)));
+ const evidence=node('article');evidence.append(node('h4','Why this was flagged'),node('p','Sentinel found '+row.observed_evidence_count+' signal'+(row.observed_evidence_count===1?'':'s')+' in the code and reviewed '+row.source_sink_evidence_count+' supporting code reference'+(row.source_sink_evidence_count===1?'':'s')+'. '+reviewPriority(row.priority)+'.'));detail.append(evidence);
+ const preconditions=node('article'),list=document.createElement('ul');row.preconditions.forEach(item=>list.append(node('li',plainLanguage(item))));preconditions.append(node('h4','What must be true for this to be exploitable'),list);detail.append(preconditions);
+ const review=document.createElement('details');review.open=row.high_evidence;review.append(node('summary','Read the detailed review'),node('p',plainLanguage(row.summary)));detail.append(review);
+ if(row.coverage_warnings.length){const gaps=document.createElement('details'),gapList=document.createElement('ul');row.coverage_warnings.slice(0,6).forEach(item=>gapList.append(node('li',plainLanguage(item))));gaps.append(node('summary','What the scan could not verify'),gapList);detail.append(gaps)}
+ const link=node('a','View this file on GitHub ↗');link.href='https://github.com/OWASP/crAPI/blob/'+scanSummary.commit_sha+'/'+row.path;link.target='_blank';link.rel='noopener';detail.append(link);
+}
+function drawModuleTable(map,query){
+ document.querySelector('#services').style.display='';
+ serviceButtons.forEach((button,index)=>button.setAttribute('aria-pressed',String(!query&&services[index]===activeService)));
+ const rows=moduleOneRows.filter(row=>query
+  ?[row.path,row.cwe,row.name,row.hypothesis,row.verification_status,displayStatus(row.verification_status),row.service,displayService(row.service)].join(' ').toLowerCase().includes(query)
+  :row.service===activeService);
+ const shell=node('section','','module-view'),heading=node('div','','module-heading'),intro=node('div');
+ intro.append(node('div','What needs your attention','label'),node('h2','Security review queue'),node('p','Every potential issue Sentinel noticed, including concerns that still need investigation. Green rows have the strongest supporting evidence.'));
+ const stats=node('div','','module-stats');
+ [[scanSummary.module_one_candidates,'potential issues'],[scanSummary.high_evidence_findings,'high confidence'],[scanSummary.repository_assets,'files scanned']].forEach(([value,label])=>{const item=node('span',label);item.prepend(node('strong',String(value)));stats.append(item)});
+ heading.append(intro,stats);shell.append(heading);
+ const scroll=node('div','','table-scroll'),table=document.createElement('table');table.className='module-table';
+ const thead=document.createElement('thead'),headRow=document.createElement('tr');['Review order','Potential issue','Location','What we checked','Result'].forEach(label=>headRow.append(node('th',label)));thead.append(headRow);table.append(thead);
+ const body=document.createElement('tbody');
+ if(!rows.length){const tr=document.createElement('tr'),td=node('td','No potential issues match your search.','empty-row');td.colSpan=5;tr.append(td);body.append(tr)}
+ rows.forEach(row=>{
+  const tr=document.createElement('tr'),priority=node('td',reviewPriority(row.priority),'priority'),candidate=document.createElement('td'),asset=document.createElement('td'),evidence=node('td',row.observed_evidence_count+' code signal'+(row.observed_evidence_count===1?'':'s')+' · '+row.source_sink_evidence_count+' supporting reference'+(row.source_sink_evidence_count===1?'':'s'),'evidence-count'),state=document.createElement('td');
+  priority.title='Internal review score: '+row.priority.toFixed(2);
+  const open=node('button',issueName(row),'candidate-link');open.append(node('small',shortLabel(plainLanguage(row.hypothesis),180)),node('small','Official name: '+row.name+' · '+row.cwe));open.addEventListener('click',()=>showModuleCandidate(row));candidate.append(open);
+  asset.append(node('strong',row.path.split('/').pop()),node('small',displayService(row.service)+' · '+displayFileType(row.language)));asset.querySelector('small').style.display='block';asset.querySelector('small').style.color='var(--muted)';
+  const statusClass=row.high_evidence?'high':row.verification_status==='refuted'?'refuted':row.verification_status==='not_analyzed'?'pending':'';const pill=node('span',displayStatus(row.verification_status),'status-pill '+statusClass);pill.title=STATUS_HELP[row.verification_status]||'';state.append(pill);
+  tr.append(priority,candidate,asset,evidence,state);body.append(tr);
+ });
+ table.append(body);scroll.append(table);shell.append(scroll);map.append(shell);
+ status.textContent=(query?'Search results':displayService(activeService))+' · '+rows.length+' of '+scanSummary.module_one_candidates+' potential issues';
+}
+function drawGraph(map,query){
+ const repo=view==='repo';
+ document.querySelector('#services').style.display=repo?'':'none';
+ const data=repo?repoGraph[activeService]:vulnGraph;
+ addViewGuide(map,repo?'Repository relationship graph':'Vulnerability knowledge graph',repo?'File nodes connected by observed typed edges such as CALLS_IN, READS, LOADS_CONFIG, ROUTES_TO, and DEPENDS_ON_MANIFEST. Select a node to inspect its exact relationships.':'CWE weaknesses connected to parent CWEs, OWASP API Security risks, and CAPEC attack patterns through official G_V catalog relationships.');
+ if(!data||!data.nodes.length){map.append(node('p','No file connections are available for '+displayService(activeService)+'. Choose another application area.','empty'));return}
+ const width=Math.max(640,map.clientWidth),height=Math.max(820,map.clientHeight),top=window.innerWidth<=600?580:320,bottom=110;
+ const nodes=data.nodes.map(d=>({...d,catalogId:d.label,role:repo?(grouped.has(d.id)?'finding':'file'):d.role,label:repo?d.id.split('/').pop():d.label}));
+ const byId=new Map(nodes.map(d=>[d.id,d])),edges=data.edges;
+ layout(nodes,edges,width,height,top,bottom);
+ const root=svg('svg',{id:'graph-view',width,height,viewBox:'0 0 '+width+' '+height,role:'img','aria-label':repo?'Typed repository relationships for '+displayService(activeService):'CWE, CAPEC, and OWASP vulnerability knowledge graph'});
+ const lines=edges.map(e=>{const a=byId.get(e.source),b=byId.get(e.target);
+  const line=svg('line',{x1:a.x,y1:a.y,x2:b.x,y2:b.y,class:edgeClass(e.type)}),title=svg('title');title.textContent=e.source+' —'+e.type+'→ '+e.target;line.append(title);root.append(line);return line});
+ const colors=repo?REPO_COLORS:VULN_COLORS;
+ let pinnedId=null;
+ const groups=nodes.map(d=>{
+  const degree=edges.filter(e=>e.source===d.id||e.target===d.id).length;
+  const g=svg('g',{tabindex:0,transform:'translate('+d.x+','+d.y+')','aria-label':repo?d.id:(d.catalogId||d.id)+' · '+d.name});
+  const title=svg('title');title.textContent=repo?d.id:(d.catalogId||d.id)+' · '+d.name;g.append(title);
+  g.append(svg('circle',{r:Math.min(15,6+degree*.9),fill:colors[d.role]}));
+  const text=svg('text',{x:0,y:Math.min(15,6+degree*.9)+13,'text-anchor':'middle'});text.textContent=d.label;g.append(text);
+  const focus=()=>{const near=new Set([d.id]);edges.forEach(e=>{if(e.source===d.id)near.add(e.target);if(e.target===d.id)near.add(e.source)});
+   groups.forEach((other,i)=>other.classList.toggle('dim',!near.has(nodes[i].id)));
+   lines.forEach((line,i)=>line.classList.toggle('dim',edges[i].source!==d.id&&edges[i].target!==d.id));showNode(d,edges,byId)};
+  g.addEventListener('pointerenter',()=>{if(!pinnedId)focus()});
+  g.addEventListener('focus',()=>{if(!pinnedId)focus()});
+  g.addEventListener('click',()=>{pinnedId=d.id;groups.forEach(other=>other.classList.remove('pinned'));g.classList.add('pinned');focus()});
+  if(query&&!(d.id+' '+(d.name||'')+' '+d.label).toLowerCase().includes(query))g.classList.add('dim');
+  root.append(g);return g});
+ map.append(root);
+ const key=node('div','','key');
+ (repo?[['finding','File with security issues'],['file','Connected file']]:Object.entries(VULN_ROLES)).forEach(([role,label])=>{const item=node('span',label),dot=document.createElement('i');dot.style.background=colors[role];item.prepend(dot);key.append(item)});
+ if(repo){
+  [...new Set(edges.map(edge=>edge.type))].sort().forEach(type=>key.append(node('span',type+' · '+REPO_RELATION_DESCRIPTIONS[type],'edge-key '+edgeClass(type))));
+  key.append(node('span',data.nodes.length+' of '+data.total_files+' connected files shown'));
+ }else{
+  key.append(node('span','CHILD_OF','edge-key'),node('span','REFERENCES_WEAKNESS','edge-key route'),node('span','EXPLOITS_WEAKNESS','edge-key data'));
+ }
+ map.append(key);
+ status.textContent=repo?displayService(activeService)+' · '+data.nodes.length+' files · '+data.edges.length+' typed relationships':nodes.length+' catalog entities · '+edges.length+' official G_V relations';
+}
+document.querySelectorAll('#views button').forEach(button=>button.addEventListener('click',()=>{
+ view=button.dataset.view;
+ document.querySelectorAll('#views button').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+ document.querySelector('#asset-search').value='';
+ document.querySelector('#asset-search').placeholder=view==='vuln'?'Search issues, OWASP risks, or attacks…':view==='module1'?'Search issues, files, or review results…':'Search files or security issues…';
+ drawMap();
+}));
 function drawMap(){
  const query=document.querySelector('#asset-search').value.trim().toLowerCase();
  const map=document.querySelector('#asset-map');
  map.replaceChildren();closePanel();
+ if(view==='module1'){
+  drawModuleTable(map,query);return;
+ }
+ if(view!=='findings'){
+  serviceButtons.forEach((b,i)=>b.setAttribute('aria-pressed',String(services[i]===activeService)));
+  drawGraph(map,query);return;
+ }
+ document.querySelector('#services').style.display='';
+ addViewGuide(map,'High-confidence security issues','Explore the 24 issues with the strongest supporting evidence. Choose an application area, then select a file to understand the risk and recommended next steps.');
+ status.textContent='Select a file to see details';
  serviceButtons.forEach((b,i)=>b.setAttribute('aria-pressed',String(!query&&services[i]===activeService)));
  const paths=[...grouped.keys()].filter(path=>query
    ?[path,...grouped.get(path).map(f=>f.cwe+' '+f.name)].join(' ').toLowerCase().includes(query)
    :serviceOf(path)===activeService);
- if(!paths.length){map.append(node('p','No matching assets.'));document.querySelector('#asset-detail').replaceChildren();return}
+ if(!paths.length){map.append(node('p','No files or security issues match your search.','empty'));document.querySelector('#asset-detail').replaceChildren();return}
  const width=Math.max(380,map.clientWidth),height=Math.max(map.clientHeight-225,Math.ceil(paths.length/2)*67+72),cx=width/2,cy=height/2;
  const network=node('div','','network');
  network.style.width=width+'px';network.style.height=height+'px';
@@ -106,7 +308,7 @@ function drawMap(){
  canvas.width=width;canvas.height=height;canvas.setAttribute('aria-hidden','true');network.append(canvas);
  const ctx=canvas.getContext('2d');
  ctx.strokeStyle='#53728e';ctx.lineWidth=1.5;
- const hub=node('div',query?'Matches':activeService,'hub');
+ const hub=node('div',query?'Search results':displayService(activeService),'hub');
  hub.style.left=cx+'px';hub.style.top=cy+'px';network.append(hub);
  paths.forEach((path,i)=>{
    const x=i%2?width*.76:width*.24;
@@ -114,7 +316,8 @@ function drawMap(){
    ctx.beginPath();ctx.moveTo(cx,cy);ctx.bezierCurveTo((cx+x)/2,cy,(cx+x)/2,y,x,y);ctx.stroke();
    const button=node('button',path.split('/').pop(),'asset-node');
    button.dataset.path=path;button.style.left=x+'px';button.style.top=y+'px';
-   button.append(node('small',grouped.get(path).length+' candidates'));
+   const issueCount=grouped.get(path).length;
+   button.append(node('small',issueCount+' high-confidence issue'+(issueCount>1?'s':'')));
    button.setAttribute('aria-pressed','false');
    const positionPanel=()=>{
      panel.style.left=i%2&&window.innerWidth>600?'18px':'auto';
@@ -133,15 +336,22 @@ function drawMap(){
 document.querySelector('#asset-search').addEventListener('input',drawMap);
 const replay=document.querySelector('#run-replay'), status=document.querySelector('#run-status');
 replay.addEventListener('click',()=>{
- replay.disabled=true;status.textContent='Replaying Module I · loading candidates';
- window.setTimeout(()=>{status.textContent='Replaying Module II · loading saved verdicts'},500);
+ replay.disabled=true;status.textContent='Loading potential issues…';
+ window.setTimeout(()=>{status.textContent='Checking supporting evidence…'},500);
  window.setTimeout(()=>{
    document.querySelector('#asset-search').value='';drawMap();
-   status.textContent='Replay complete · '+assetFindings.length+' candidates from the saved scan';
+   status.textContent='Scan replay complete · '+moduleOneRows.length+' potential issues reviewed · '+assetFindings.length+' high-confidence issues';
    replay.disabled=false;
  },1100);
 });
 window.addEventListener('resize',drawMap);
+// index.html#module1, #repo, or #vuln opens directly on that saved scan view.
+if(['module1','repo','vuln'].includes(location.hash.slice(1))){
+ view=location.hash.slice(1);
+ document.querySelectorAll('#views button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===view)));
+ if(view==='vuln')document.querySelector('#asset-search').placeholder='Search issues, OWASP risks, or attacks…';
+ if(view==='module1')document.querySelector('#asset-search').placeholder='Search issues, files, or review results…';
+}
 drawMap();
 </script>
 </html>

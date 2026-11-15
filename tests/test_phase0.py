@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from sentinel.contracts import AssetType, EdgeType
-from sentinel.phase0 import RepositoryExtractor
+from sentinel.phase0 import RepositoryExtractor, _parse_go
 
 
 def test_graph_contains_only_file_assets_and_evidenced_edges(sample_graph):
@@ -93,6 +93,18 @@ POLYGLOT_REPO = {
         '  _ = bson.M{"code": c}\n  cfg := &tls.Config{InsecureSkipVerify: true}\n}\n'
     ),
 }
+
+
+def test_go_qualified_calls_are_extracted_with_crlf_source():
+    facts = _parse_go(
+        'package router\r\n\r\nimport "example.com/community/api/models"\r\n\r\n'
+        'func Check() bool { return models.Validate("x") }\r\n'
+    )
+    assert (
+        "example.com/community/api/models#Validate",
+        "go_call",
+        5,
+    ) in facts.references
 
 
 def test_polyglot_static_resolution(tmp_path: Path):
@@ -195,3 +207,76 @@ def test_path_normalization_keeps_dotfile_directories(tmp_path: Path):
         _edges(graph, EdgeType.IMPORTS)
     )
     assert any(item.reference == "../../outside" for item in graph.unresolved)
+
+
+def test_relationships_beyond_imports_are_extracted_from_syntax(tmp_path: Path):
+    _write(
+        tmp_path,
+        {
+            **POLYGLOT_REPO,
+            # Python: a call through an import, and a config file named in a string literal.
+            "svc/settings.yaml": "debug: false\n",
+            "svc/crapi/shop/service.py": (
+                "import requests\nfrom crapi.mechanic import models\n"
+                "def run(request):\n"
+                "    config = open('settings.yaml')\n"
+                "    data = request.json\n"
+                "    return models.M(), requests.get('https://example.invalid/a.json')\n"
+            ),
+            # Java: a type that is constructed and called through a field.
+            "id/src/main/java/com/x/Caller.java": (
+                "package com.x;\nimport com.x.service.Svc;\nimport com.x.Ctl;\n"
+                "class Caller {\n  Svc svc;\n  void go() { svc.run(); }\n}\n"
+            ),
+            # Go: a call to a function that one file of the imported package defines.
+            "go/api/models/coupon.go": "package models\n\nfunc Validate(c string) bool { return true }\n",
+            "go/api/models/other.go": "package models\n\nfunc Unused() {}\n",
+            "go/api/router/use.go": (
+                'package router\n\nimport "example.com/community/api/models"\n\n'
+                'func Check() bool { return models.Validate("x") }\n'
+            ),
+            # JS: an imported name that is called.
+            "web/src/containers/signup/form.js": (
+                "import { a } from '../../actions/userActions';\nexport const run = () => a();\n"
+            ),
+            # Infrastructure: a script run by a Dockerfile and a key file read by a config.
+            "svc/Dockerfile": 'FROM python\nCOPY . /app\nCMD ["./runner.sh"]\n',
+            "svc/runner.sh": "python manage.py runserver\n",
+            "svc/certs/server.key": "not-a-real-key\n",
+            "svc/nginx.conf": "ssl_certificate_key /app/certs/server.key;\n",
+        },
+    )
+    graph = RepositoryExtractor().extract(tmp_path)
+
+    def edges(kind: EdgeType) -> set[tuple[str, str]]:
+        return {(source, target) for source, target, _ in _edges(graph, kind)}
+
+    calls = edges(EdgeType.CALLS_IN)
+    assert ("svc/crapi/shop/service.py", "svc/crapi/mechanic/models.py") in calls
+    assert (
+        "id/src/main/java/com/x/Caller.java",
+        "id/src/main/java/com/x/service/Svc.java",
+    ) in calls
+    # Imported but never used: an import edge only, not a call.
+    assert ("id/src/main/java/com/x/Caller.java", "id/src/main/java/com/x/Ctl.java") not in calls
+    assert ("go/api/router/use.go", "go/api/models/coupon.go") in calls
+    assert ("go/api/router/use.go", "go/api/models/other.go") not in calls
+    assert ("web/src/containers/signup/form.js", "web/src/actions/userActions.ts") in calls
+    assert ("svc/crapi/shop/service.py", "svc/settings.yaml") in edges(EdgeType.LOADS_CONFIG)
+    assert ("svc/Dockerfile", "svc/runner.sh") in edges(EdgeType.EXECUTES)
+    assert ("svc/runner.sh", "svc/manage.py") in edges(EdgeType.EXECUTES)
+    assert ("svc/nginx.conf", "svc/certs/server.key") in edges(EdgeType.READS)
+    # Library calls, attribute chains, and URLs never become file edges or unresolved noise.
+    targets = {target for _, target, _ in _edges(graph)}
+    assert not any(target.endswith("a.json") for target in targets)
+    assert not any(
+        item.kind in {"python_call", "path_ref", "exec_ref", "java_call", "go_call", "js_call"}
+        for item in graph.unresolved
+    )
+    # Every new edge cites line-level observed evidence in its source file.
+    evidence = {item.evidence_id: item for item in graph.evidence}
+    paths = {asset.asset_id: asset.path for asset in graph.assets}
+    for edge in graph.edges:
+        if edge.edge_type in {EdgeType.CALLS_IN, EdgeType.READS, EdgeType.EXECUTES}:
+            record = evidence[edge.evidence_refs[0]]
+            assert record.start_line and record.source_path == paths[edge.source_asset_id]

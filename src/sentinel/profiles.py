@@ -35,6 +35,8 @@ class ScanProfile:
     # time only, never results, so they are not part of any cache identity.
     partition_concurrency: int = 1
     review_concurrency: int = 1
+    # Characters of tool output one Module II/III agent may accumulate (about 4 per token).
+    review_context_chars: int = 200_000
 
     def discovery_identity(self) -> dict[str, object]:
         """Fields that can change graph and Module I outputs."""
@@ -51,6 +53,7 @@ class ScanProfile:
         return {
             "supervisor_tool_calls": self.supervisor_tool_calls,
             "subagent_tool_calls": self.subagent_tool_calls,
+            "review_context_chars": self.review_context_chars,
         }
 
 
