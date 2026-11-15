@@ -1,3 +1,3 @@
-"""SENTINEL: authorized, repository-first security analysis."""
+"""SENTINEL defensive repository analysis platform."""
 
 __version__ = "0.1.0"

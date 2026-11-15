@@ -1,19 +1,27 @@
-import os
-from dataclasses import dataclass
-from pathlib import Path
+from functools import lru_cache
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-@dataclass(frozen=True)
-class Limits:
-    max_files: int = 2000
-    max_file_bytes: int = 512_000
-    max_total_bytes: int = 20_000_000
-    max_archive_bytes: int = 20_000_000
-    max_depth: int = 5
-    max_paths: int = 30
-    max_graph_nodes: int = 80
-    max_workers: int = 4
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_env: str = "development"
+    database_url: str | None = None
+    redis_url: str | None = None
+    object_store_endpoint: str | None = None
+    object_store_bucket: str = "sentinel-artifacts"
+    model_provider: str | None = None
+    model_id_supervisor: str | None = None
+    model_id_code_analysis: str | None = None
+    model_id_review: str | None = None
+    default_scan_profile: Literal["fast", "balanced", "deep"] = "balanced"
+    sandbox_network_policy: Literal["deny", "allowlisted"] = "deny"
+    enable_source_writes: bool = False
+    enable_automated_pr: bool = False
 
 
-def state_directory() -> Path:
-    return Path(os.environ.get("SENTINEL_STATE_DIR", ".sentinel")).resolve()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
