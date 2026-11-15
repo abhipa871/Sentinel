@@ -25,6 +25,22 @@ The `scan` command performs Phase 0 and Module I without executing analyzed code
 and III require a configured Deep Agents runtime. Source writes stay disabled unless the
 independently tested write gateway is deliberately enabled.
 
+For an OpenAI-backed scan, copy `.env.example` to `.env` and set `OPENAI_API_KEY`.
+The CLI loads `.env` from the current directory and preserves existing environment variables.
+
+To use Kimi, add `MOONSHOT_API_KEY` to `.env` and pass `--model moonshot:kimi-k2.5`.
+
+```powershell
+.venv\Scripts\sentinel scan https://github.com/OWASP/crAPI --through module3 --model openai:gpt-5.6-luna --max-candidates 10 --output artifacts\crapi-openai-scan.json
+```
+
+Discovery, verification, and remediation agents can search the pinned MITRE CWE definitions
+and read related mitigations through `search_weaknesses` and `knowledge_neighborhood`.
+The catalog includes alternate terms, extended descriptions, consequences, detection guidance,
+platforms, and mapping notes where supplied by MITRE. Agents must assess applicability against
+repository evidence. The candidate limit bounds this run's scope, and coverage gaps appear in
+the report.
+
 ## Vulnerability knowledge graph
 
 SENTINEL ships a checksum-verified predefined `G_V` built from the complete MITRE CWE 5.0,
@@ -45,3 +61,7 @@ counts, relation counts, and the parser version are embedded in every snapshot.
 See [architecture](docs/architecture/overview.md), the
 [vulnerability graph contract](docs/architecture/vulnerability-graph.md), and the
 [API contract](docs/api/v1.md).
+
+## Hackathon website
+
+The interactive asset graph demo is in [website/](website/README.md). Open `website/index.html` with `assets-data.js` in the same directory. The run button replays saved results; presentation labels and original verification outcomes are documented in the website README.

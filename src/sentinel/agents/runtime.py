@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -25,10 +26,11 @@ from sentinel.contracts import (
     SecurityReviewProposal,
     SpecialistReview,
 )
-from sentinel.knowledge_graph import KnowledgeGraphIndex
+from sentinel.knowledge_graph import KnowledgeGraphIndex, load_predefined_graph
 from sentinel.secrets import redact_secrets
 
 FILESYSTEM_TOOLS = frozenset({"ls", "write_file", "edit_file", "delete", "glob", "grep", "execute"})
+logger = logging.getLogger(__name__)
 
 # Module I is discovery-only. Any of these phrases in a hypothesis or discovery basis is treated
 # as a verification verdict, even when negated, and is rejected by the contract validator.
@@ -60,6 +62,14 @@ _EVIDENCE_ID_LIST_KEYS = frozenset(
     }
 )
 CANDIDATE_HANDLE = "C000001"
+CWE_GUIDANCE = (
+    "Use search_weaknesses to find documented MITRE CWE weaknesses and "
+    "knowledge_neighborhood to read their definitions, relationships, and mitigation text. "
+    "Choose the most specific weakness supported by the inspected source. Catalog definitions "
+    "are reference knowledge, not evidence that this repository is vulnerable. Test the "
+    "weakness preconditions against source evidence and counterevidence. For remediation, "
+    "adapt the documented mitigations to the affected code and state required validation."
+)
 MODULE_TWO_SPECIALISTS = frozenset(
     {"traversal", "code-analysis", "dependency-config", "ai-security", "evidence-review"}
 )
@@ -403,6 +413,38 @@ class EvidenceToolbox:
             "limit_clamped": requested_limit != limit,
         }
 
+    def search_weaknesses(
+        self,
+        query: str,
+        limit: Annotated[int, Field(ge=1, le=20)] = 10,
+    ) -> dict[str, Any]:
+        """Search the pinned MITRE CWE weakness definitions by ID or keywords."""
+        if self.knowledge is None:
+            return {"error": "vulnerability knowledge graph is unavailable"}
+        terms = query.casefold().split()
+        if not terms or len(query) > 200:
+            return {"error": "query must contain one to 200 characters"}
+        limit = max(1, min(limit, 20))
+        matches = []
+        for entity in self.knowledge.entities.values():
+            if (
+                entity.entity_type != "CWE"
+                or dict(entity.metadata).get("catalog_kind") != "weakness"
+            ):
+                continue
+            content = f"{entity.entity_id} {entity.name} {' '.join(entity.aliases)} {entity.description or ''}".casefold()
+            if all(term in content for term in terms):
+                matches.append(entity)
+        matches.sort(
+            key=lambda entity: (entity.entity_id.casefold() != query.casefold(), entity.entity_id)
+        )
+        return {
+            "knowledge_snapshot_id": str(self.knowledge.graph.kb_snapshot_id),
+            "matches": [entity.model_dump(mode="json") for entity in matches[:limit]],
+            "total_matches": len(matches),
+            "truncated": len(matches) > limit,
+        }
+
     def knowledge_neighborhood(
         self,
         entity_id: str,
@@ -416,12 +458,23 @@ class EvidenceToolbox:
         entity = self.knowledge.entity(entity_id)
         if entity is None:
             return {"error": "unknown vulnerability knowledge entity", "entity_id": entity_id}
+        relations = self.knowledge.neighborhood(entity_id, limit=limit)
+        related_ids = {row.source_id for row in relations} | {row.target_id for row in relations}
+        related_ids.discard(entity_id)
         return {
+            "knowledge_snapshot_id": str(self.knowledge.graph.kb_snapshot_id),
+            "source_url": (
+                f"https://cwe.mitre.org/data/definitions/{entity.raw_id}.html"
+                if entity.entity_type == "CWE"
+                else None
+            ),
             "entity": entity.model_dump(mode="json"),
-            "relations": [
-                relation.model_dump(mode="json")
-                for relation in self.knowledge.neighborhood(entity_id, limit=limit)
+            "related_entities": [
+                related.model_dump(mode="json")
+                for identifier in sorted(related_ids)
+                if (related := self.knowledge.entity(identifier)) is not None
             ],
+            "relations": [relation.model_dump(mode="json") for relation in relations],
             "limit_clamped": requested_limit != limit,
         }
 
@@ -548,6 +601,7 @@ class DeepAgentsRuntime:
         for selected in (model, code_model, review_model):
             if selected is not None and (not selected or ":" not in selected):
                 raise ValueError("model must be a LangChain provider:model identifier")
+        self.vulnerability_graph = load_predefined_graph()
         self.model = model
         self.code_model = code_model or model
         self.review_model = review_model or model
@@ -562,6 +616,8 @@ class DeepAgentsRuntime:
         )
         for model_id in {self.model, self.code_model, self.review_model}:
             self._register_locked_profile(model_id)
+            if model_id.startswith("moonshot:"):
+                self._register_locked_profile(model_id.replace("moonshot:", "openai:", 1))
         self.supervisor_client = self._model_client(self.model)
         self.code_client = self._model_client(self.code_model)
         self.review_client = self._model_client(self.review_model)
@@ -578,7 +634,21 @@ class DeepAgentsRuntime:
         from langchain.chat_models import init_chat_model
 
         provider_options: dict[str, Any] = {}
-        if provider == "openai":
+        if provider == "moonshot":
+            api_key = os.getenv("MOONSHOT_API_KEY")
+            if not api_key:
+                raise ValueError("Set MOONSHOT_API_KEY in .env or the environment to use Kimi")
+            provider = "openai"
+            provider_options.update(
+                api_key=api_key,
+                base_url="https://api.moonshot.ai/v1",
+                use_responses_api=False,
+            )
+            if model_name == "kimi-k2.5":
+                provider_options["extra_body"] = {"thinking": {"type": "disabled"}}
+            elif model_name.startswith("kimi-k3.1-pro"):
+                provider_options["reasoning_effort"] = "low"
+        elif provider == "openai":
             # GPT-5.6 Luna currently rejects function tools plus reasoning on Chat
             # Completions. Keep the requested model and tool surface, but temporarily
             # disable provider-side reasoning until the Responses path is enabled.
@@ -593,9 +663,14 @@ class DeepAgentsRuntime:
 
     def _invoke_stage(self, agent: Any, payload: dict[str, Any], stage: str) -> dict[str, Any]:
         for attempt in range(1, self.max_stage_attempts + 1):
+            started = time.monotonic()
+            logger.info("Starting %s (attempt %d)", stage, attempt)
             try:
-                return cast(dict[str, Any], agent.invoke(payload))
+                result = cast(dict[str, Any], agent.invoke(payload))
+                logger.info("Completed %s in %.1fs", stage, time.monotonic() - started)
+                return result
             except Exception as exc:
+                logger.warning("%s failed on attempt %d (%s)", stage, attempt, type(exc).__name__)
                 text = f"{type(exc).__name__}: {exc}".casefold()
                 transient = any(
                     token in text
@@ -673,7 +748,9 @@ class DeepAgentsRuntime:
         return create_deep_agent(
             model=model,
             tools=tools,
-            system_prompt=system_prompt,
+            system_prompt=f"{system_prompt} {CWE_GUIDANCE}"
+            if any(tool.name == "search_weaknesses" for tool in tools)
+            else system_prompt,
             response_format=_typed_response(response_format),
             skills=["/skills/"],
         )
@@ -1052,10 +1129,30 @@ class DeepAgentsRuntime:
         from deepagents import create_deep_agent
 
         tools = self._tools(
-            [toolbox.graph_neighbors, toolbox.read_source_span, toolbox.read_evidence]
+            [
+                toolbox.graph_neighbors,
+                toolbox.read_source_span,
+                toolbox.read_evidence,
+                toolbox.search_weaknesses,
+                toolbox.knowledge_neighborhood,
+            ]
         )
-        graph_tools = self._tools([toolbox.graph_neighbors, toolbox.read_evidence])
-        source_tools = self._tools([toolbox.read_source_span, toolbox.read_evidence])
+        graph_tools = self._tools(
+            [
+                toolbox.graph_neighbors,
+                toolbox.read_evidence,
+                toolbox.search_weaknesses,
+                toolbox.knowledge_neighborhood,
+            ]
+        )
+        source_tools = self._tools(
+            [
+                toolbox.read_source_span,
+                toolbox.read_evidence,
+                toolbox.search_weaknesses,
+                toolbox.knowledge_neighborhood,
+            ]
+        )
         if planning:
             specialists = [
                 {
@@ -1150,12 +1247,14 @@ class DeepAgentsRuntime:
                 f"Stop after at most {self.max_review_calls} meaningful tool/delegation calls."
             )
         for specialist in specialists:
-            specialist["system_prompt"] = f"{specialist['system_prompt']} {HANDLE_OUTPUT_RULE}"
+            specialist["system_prompt"] = (
+                f"{specialist['system_prompt']} {CWE_GUIDANCE} {HANDLE_OUTPUT_RULE}"
+            )
         return create_deep_agent(
             model=self.supervisor_client,
             tools=[],
             subagents=cast(Any, specialists),
-            system_prompt=f"{prompt} {HANDLE_OUTPUT_RULE}",
+            system_prompt=f"{prompt} {CWE_GUIDANCE} {HANDLE_OUTPUT_RULE}",
             response_format=_typed_response(response_format),
             skills=["/skills/"],
         )
@@ -1170,6 +1269,7 @@ class DeepAgentsRuntime:
                 toolbox.graph_neighbors,
                 toolbox.read_source_span,
                 toolbox.read_evidence,
+                toolbox.search_weaknesses,
                 toolbox.knowledge_neighborhood,
             ]
         )
@@ -1321,6 +1421,7 @@ class DeepAgentsRuntime:
                 toolbox.graph_neighbors,
                 toolbox.read_source_span,
                 toolbox.read_evidence,
+                toolbox.search_weaknesses,
                 toolbox.knowledge_neighborhood,
             ]
         )
@@ -1391,6 +1492,7 @@ class DeepAgentsRuntime:
         *,
         max_candidates: int,
     ) -> ModuleOneAgentOutput:
+        self.vulnerability_graph = vulnerability_graph
         toolbox = EvidenceToolbox(graph, vulnerability_graph)
         compact_leads = [
             {
@@ -1432,6 +1534,7 @@ class DeepAgentsRuntime:
                 toolbox.graph_neighbors,
                 toolbox.read_source_span,
                 toolbox.read_evidence,
+                toolbox.search_weaknesses,
                 toolbox.knowledge_neighborhood,
             ]
         )
@@ -1657,11 +1760,12 @@ class DeepAgentsRuntime:
     def review_candidate(
         self, candidate: PotentialVulnerabilityRow, graph: RepositoryAssetGraph
     ) -> SecurityReviewProposal:
-        toolbox = EvidenceToolbox(graph)
+        toolbox = EvidenceToolbox(graph, self.vulnerability_graph)
         presented = toolbox.present(candidate.model_dump(mode="json"))
         presented["candidate_id"] = CANDIDATE_HANDLE
         packet = {
             "candidate": presented,
+            "weakness_documentation": toolbox.knowledge_neighborhood(candidate.vulnerability_id),
             "asset_catalog": toolbox.asset_catalog(),
             "instruction": (
                 "Review this candidate only. Delegate to the named specialists, passing them the "
@@ -1697,7 +1801,7 @@ class DeepAgentsRuntime:
         findings: tuple[DetectedVulnerabilityRow, ...],
         graph: RepositoryAssetGraph,
     ) -> PlanningProposal:
-        toolbox = EvidenceToolbox(graph)
+        toolbox = EvidenceToolbox(graph, self.vulnerability_graph)
         eligible = [
             toolbox.present(finding.model_dump(mode="json"))
             for finding in findings

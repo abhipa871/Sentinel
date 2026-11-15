@@ -14,3 +14,5 @@ artifacts/
 .sentinel/
 node_modules/
 .next/
+
+.venv-old/

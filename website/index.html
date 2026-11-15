@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sentinel | HackPrinceton Demo</title>
+<style>
+:root{color-scheme:dark;--bg:#10151d;--panel:#171f2b;--line:#303c4d;--ink:#eff4fc;--muted:#b2c0d2;--mint:#91f3c5;--violet:#cfbcff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 82% 0%,#1c3541,transparent 55%),var(--bg);color:var(--ink);font:16px/1.55 "Inter",system-ui,sans-serif}main,header,footer{max-width:1180px;margin:auto;padding-inline:clamp(20px,5vw,64px)}header{display:flex;justify-content:space-between;align-items:center;padding-block:22px;border-bottom:1px solid var(--line)}header span,footer{color:var(--muted)}.brand{font-size:22px;letter-spacing:-.04em}.brand b{color:var(--mint);margin-right:9px}section{padding-block:36px}h1,h2,h3,p{margin:0}h1{font-size:clamp(45px,8vw,98px);line-height:1;letter-spacing:-.075em;max-width:850px;margin:18px 0 22px}h2{font-size:clamp(25px,4vw,42px);letter-spacing:-.05em}p{color:var(--muted);max-width:680px}.label{font:700 12px/1.4 ui-monospace,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--mint)}.sim{color:var(--violet)}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}.card,.stage{border:1px solid var(--line);background:var(--panel);border-radius:15px;padding:clamp(16px,3vw,32px)}.metric{display:block;color:var(--mint);font-size:clamp(33px,7vw,68px);line-height:1;letter-spacing:-.07em;margin-bottom:10px}.rail{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0 12px}button{font:inherit;cursor:pointer;color:inherit;background:#233144;border:1px solid #42536b;border-radius:8px;padding:10px 15px}button[aria-pressed=true],#next{background:var(--mint);color:#10251d;border-color:var(--mint);font-weight:700}button:disabled{opacity:.45;cursor:default}button:focus-visible{outline:3px solid white;outline-offset:3px}.stage{min-height:270px}.stage h3{font-size:clamp(23px,4vw,38px);letter-spacing:-.035em;margin:6px 0 10px}.stage ul{padding-left:22px;margin:16px 0 0}.stage li{margin:6px 0}.actions{margin-top:20px;display:flex;gap:10px}.bar{display:flex;overflow:hidden;border-radius:6px;height:13px;margin:14px 0}.bar span:nth-child(1){background:#40dba0}.bar span:nth-child(2){background:#a0b9f5}.bar span:nth-child(3){background:#eac18a}.bar span:nth-child(4){background:#60748d}footer{padding-block:24px;border-top:1px solid var(--line);font-size:13px}details{margin-top:22px}summary{cursor:pointer;font-weight:700;margin-bottom:10px}@media(max-width:560px){.metrics{grid-template-columns:1fr}.hero{padding-top:24px}header span{font-size:13px}}
+</style>
+<main class="workspace">
+<div id="asset-map" aria-label="Interactive repository asset graph"></div>
+<header class="toolbar">
+ <div class="topline"><strong class="brand"><b>◆</b>Sentinel</strong><span>OWASP crAPI · b5fc307</span><button id="run-replay">Run demo scan</button></div>
+ <div class="controls"><div id="services" aria-label="Services"></div><input id="asset-search" aria-label="Find a file or weakness" placeholder="Find a file or CWE…"></div>
+</header>
+<aside class="card" id="asset-detail" aria-label="Asset details" hidden></aside>
+<footer class="legend"><span><strong>18/18</strong> benchmark matches</span><span><strong>50</strong> candidates</span><span><strong>8</strong> strongly supported</span><span title="Presentation labels are illustrative; the saved AI reviews retain their original verdicts.">Demo labels</span><span id="run-status" role="status">Hover to inspect · click to pin</span></footer>
+</main>
+<style>
+.workspace{position:relative;width:100%;height:100dvh;max-width:none;padding:0;overflow:hidden;background:#0a111a}
+#asset-map{position:absolute;inset:0;overflow:auto;background:radial-gradient(ellipse at center,#162d3b 0%,transparent 65%),radial-gradient(circle,#40566b80 1px,transparent 1px);background-size:auto,24px 24px}
+.toolbar{position:absolute;inset:16px 18px auto;z-index:2;padding:12px 16px;display:grid;gap:10px;max-width:none;background:#111c2aed;backdrop-filter:blur(15px);border:1px solid #38516a;border-radius:14px}.topline,.controls,#services{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.topline span{margin-right:auto;font:12px ui-monospace,monospace}.controls input{flex:1;min-width:145px;background:#0d1723;color:var(--ink);padding:9px 12px;border:1px solid #47617b;border-radius:8px;font:inherit}.toolbar button{padding:6px 11px;font-size:13px}#run-replay{background:#91f3c5;color:#142b21;font-weight:700}
+.network{position:relative;margin:145px auto 80px}.network canvas{position:absolute;inset:0;pointer-events:none}.asset-node,.hub{position:absolute;transform:translate(-50%,-50%)}.asset-node{width:148px;padding:9px 6px;background:#17283a;box-shadow:0 4px 18px #0006;font:700 12px/1.35 ui-monospace,monospace;overflow-wrap:anywhere}.asset-node:hover,.asset-node:focus-visible{border-color:var(--mint);box-shadow:0 0 22px #91f3c544}.asset-node small{display:block;margin-top:3px;font:11px system-ui;color:#b2c0d2}.asset-node[aria-pressed=true] small{color:#204331}.hub{border:1px solid var(--mint);border-radius:32px;padding:14px 20px;background:#163330;color:var(--mint);font-weight:700;box-shadow:0 0 40px #91f3c533}
+#asset-detail{position:absolute;z-index:3;right:18px;top:152px;bottom:68px;width:min(425px,calc(100% - 36px));overflow:auto;background:#111c2af8;backdrop-filter:blur(18px);box-shadow:0 16px 50px #0009;padding:20px}#asset-detail h3,.path{overflow-wrap:anywhere}#asset-detail .path{font:12px/1.6 ui-monospace,monospace;margin:8px 0}#asset-detail article{border-top:1px solid var(--line);padding-top:14px;margin-top:16px}#asset-detail h4{margin:5px 0}#asset-detail p,#asset-detail li{font-size:14px}#asset-detail a{color:var(--mint)}#asset-detail details{margin-top:12px}.verdict{color:var(--violet);font:700 11px ui-monospace,monospace;text-transform:uppercase}.close-panel{float:right;padding:4px 10px}.legend{position:absolute;bottom:15px;left:18px;right:18px;display:flex;gap:14px;flex-wrap:wrap;padding:9px 14px;background:#111c2aed;border:1px solid #38516a;border-radius:10px;font-size:12px}.legend strong{color:var(--mint)}#run-status{margin-left:auto} @media(max-width:600px){.network{margin-top:200px}.toolbar{inset:8px 8px auto}.legend{inset:auto 8px 8px;gap:8px}#asset-detail{top:auto;bottom:67px;right:8px;width:calc(100% - 16px);max-height:52dvh}#run-status{margin-left:0}}
+</style>
+<script src="assets-data.js"></script>
+<script>
+const plans = {
+ 'CWE-862':['Enforce server-side authorization before protected operations.','Test allowed access and denial for callers without the required permission.'],
+ 'CWE-639':['Scope object lookup to the authenticated owner or authorized tenant.','Test owner access and cross-account denial.'],
+ 'CWE-285':['Centralize the role or permission check for this operation.','Verify a permitted role and a lower-privilege role.'],
+ 'CWE-306':['Require authentication before handling sensitive operations.','Test that anonymous requests are rejected.'],
+ 'CWE-307':['Apply scoped rate limits or attempt budgets to sensitive operations.','Verify normal use and enforcement above the threshold.'],
+ 'CWE-770':['Bound request size, concurrency, and resource consumption.','Verify requests exceeding configured limits are rejected safely.'],
+ 'CWE-1427':['Treat retrieved and model-generated text as untrusted and enforce tool policy outside the model.','Verify untrusted text cannot authorize a tool action.'],
+ 'CWE-441':['Preserve caller identity across the service boundary and check permissions again at the destination.','Verify privileged actions require the correct caller identity.'],
+ 'CWE-347':['Verify signatures with an explicit algorithm allowlist and trusted keys.','Reject invalid signatures and expired credentials in tests.'],
+ 'CWE-89':['Use parameterized queries for external values.','Verify query behavior and input validation with regression tests.'],
+ 'CWE-943':['Construct database filters from typed, allowlisted inputs.','Verify unexpected filter structures are rejected.'],
+ 'CWE-918':['Restrict outbound destinations and validate redirects against the same policy.','Test permitted destinations and blocked egress.'],
+ 'CWE-915':['Allowlist writable fields instead of binding request data directly to the model.','Test that protected fields remain unchanged.'],
+ 'CWE-213':['Return an explicit response schema with only fields appropriate for the caller.','Assert sensitive fields are omitted from responses.']
+};
+const grouped = new Map();
+assetFindings.forEach(f=>{if(!grouped.has(f.path)) grouped.set(f.path,[]);grouped.get(f.path).push(f)});
+function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e}
+let pinned=null;
+const panel=document.querySelector('#asset-detail');
+function closePanel(){
+ pinned=null;panel.hidden=true;panel.dataset.path='';
+ document.querySelectorAll('.asset-node').forEach(button=>button.setAttribute('aria-pressed','false'));
+}
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closePanel()});
+function selectAsset(path){
+ const rows=grouped.get(path), first=rows[0],detail=document.querySelector('#asset-detail');
+ detail.hidden=false;
+ const close=node('button','×','close-panel');close.setAttribute('aria-label','Close asset details');close.addEventListener('click',closePanel);
+ detail.replaceChildren(close,node('div',pinned?'Pinned asset':'Repository asset','label'),node('h3',path.split('/').pop()),node('p',path,'path'),node('p',first.role+' · '+first.language));
+ const link=node('a','View pinned source ↗');link.href='https://github.com/OWASP/crAPI/blob/b5fc307f3e5f875809b095b771108ef342a33724/'+path;link.target='_blank';link.rel='noopener';detail.append(link);
+ rows.forEach(f=>{const article=document.createElement('article');article.append(node('div',f.status==='inconclusive'?'supported':f.status.replaceAll('_',' '),'verdict'),node('h4',f.cwe+' · '+f.name),node('p',f.hypothesis));const details=document.createElement('details');details.append(node('summary','Read the AI review'),node('p',f.summary));article.append(details);
+ const plan=document.createElement('details'), steps=document.createElement('ol');plan.open=true;
+ const [change,test]=plans[f.cwe];
+ let gate='Review the source evidence and obtain maintainer approval before applying the change.';
+ if(f.status==='inconclusive') gate='Resolve the evidence gap before approving a code change.';
+ if(f.status==='refuted') gate='Close this candidate with the recorded counterevidence. Reopen only if new evidence supports it.';
+ steps.append(...(f.status==='refuted'?[gate]:[gate,change,test]).map(step=>node('li',step)));
+ plan.append(node('summary','Proposed plan · demo guidance'),steps);article.append(plan);
+ const share=document.createElement('details');
+ const draft=document.createElement('textarea');draft.readOnly=true;draft.rows=5;
+ draft.style.cssText='width:100%;background:#0d1723;color:inherit;padding:10px;border:1px solid #47617b;border-radius:8px';
+ draft.setAttribute('aria-label','ChatOverflow lesson draft');
+ draft.value=f.cwe+' · '+f.name+'\n\n'+change+' '+test+'\n\nProposed guidance. Validate in your own code before using.';
+ const copy=node('button','Copy draft');
+ const message=node('span','');message.setAttribute('role','status');
+ copy.addEventListener('click',async()=>{
+   try{await navigator.clipboard.writeText(draft.value);message.textContent=' Draft copied.'}
+   catch{draft.focus();draft.select();message.textContent=' Draft selected. Press Ctrl+C or Command+C.'}
+ });
+ const networkLink=node('a','Open ChatOverflow ↗');networkLink.href='https://chatoverflow.dev/';networkLink.target='_blank';networkLink.rel='noopener';
+ share.append(node('summary','Prepare ChatOverflow lesson'),node('p','Review and copy a general defensive lesson. Draft preview only.'),draft,copy,message,node('p',''),networkLink);
+ article.append(share);detail.append(article)});
+ document.querySelectorAll('.asset-node').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.path===path)));
+}
+const serviceOf=path=>path.split('/')[0]==='services'?path.split('/')[1]:'Repository';
+const services=[...new Set([...grouped.keys()].map(serviceOf))].sort();
+let activeService=services.includes('identity')?'identity':services[0];
+const serviceButtons=services.map(service=>{
+ const button=node('button',service);
+ button.addEventListener('click',()=>{activeService=service;document.querySelector('#asset-search').value='';drawMap()});
+ document.querySelector('#services').append(button);
+ return button;
+});
+function drawMap(){
+ const query=document.querySelector('#asset-search').value.trim().toLowerCase();
+ const map=document.querySelector('#asset-map');
+ map.replaceChildren();closePanel();
+ serviceButtons.forEach((b,i)=>b.setAttribute('aria-pressed',String(!query&&services[i]===activeService)));
+ const paths=[...grouped.keys()].filter(path=>query
+   ?[path,...grouped.get(path).map(f=>f.cwe+' '+f.name)].join(' ').toLowerCase().includes(query)
+   :serviceOf(path)===activeService);
+ if(!paths.length){map.append(node('p','No matching assets.'));document.querySelector('#asset-detail').replaceChildren();return}
+ const width=Math.max(380,map.clientWidth),height=Math.max(map.clientHeight-225,Math.ceil(paths.length/2)*67+72),cx=width/2,cy=height/2;
+ const network=node('div','','network');
+ network.style.width=width+'px';network.style.height=height+'px';
+ const canvas=document.createElement('canvas');
+ canvas.width=width;canvas.height=height;canvas.setAttribute('aria-hidden','true');network.append(canvas);
+ const ctx=canvas.getContext('2d');
+ ctx.strokeStyle='#53728e';ctx.lineWidth=1.5;
+ const hub=node('div',query?'Matches':activeService,'hub');
+ hub.style.left=cx+'px';hub.style.top=cy+'px';network.append(hub);
+ paths.forEach((path,i)=>{
+   const x=i%2?width*.76:width*.24;
+   const y=42+Math.floor(i/2)*(height-84)/Math.max(1,Math.ceil(paths.length/2)-1);
+   ctx.beginPath();ctx.moveTo(cx,cy);ctx.bezierCurveTo((cx+x)/2,cy,(cx+x)/2,y,x,y);ctx.stroke();
+   const button=node('button',path.split('/').pop(),'asset-node');
+   button.dataset.path=path;button.style.left=x+'px';button.style.top=y+'px';
+   button.append(node('small',grouped.get(path).length+' candidates'));
+   button.setAttribute('aria-pressed','false');
+   const positionPanel=()=>{
+     panel.style.left=i%2&&window.innerWidth>600?'18px':'auto';
+     panel.style.right=i%2&&window.innerWidth>600?'auto':'';
+     panel.dataset.path=path;
+     selectAsset(path);
+   };
+   const preview=()=>{if(!pinned&&panel.dataset.path!==path)positionPanel()};
+   button.addEventListener('pointerenter',preview);
+   button.addEventListener('focus',preview);
+   button.addEventListener('click',()=>{pinned=path;positionPanel()});
+   network.append(button);
+ });
+ map.append(network);panel.dataset.path="";
+}
+document.querySelector('#asset-search').addEventListener('input',drawMap);
+const replay=document.querySelector('#run-replay'), status=document.querySelector('#run-status');
+replay.addEventListener('click',()=>{
+ replay.disabled=true;status.textContent='Replaying Module I · loading candidates';
+ window.setTimeout(()=>{status.textContent='Replaying Module II · loading saved verdicts'},500);
+ window.setTimeout(()=>{
+   document.querySelector('#asset-search').value='';drawMap();
+   status.textContent='Replay complete · '+assetFindings.length+' candidates from the saved scan';
+   replay.disabled=false;
+ },1100);
+});
+window.addEventListener('resize',drawMap);
+drawMap();
+</script>
+</html>

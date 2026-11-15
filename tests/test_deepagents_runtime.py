@@ -12,6 +12,43 @@ from sentinel.knowledge_graph import load_predefined_graph
 from sentinel.module3 import ModuleThree
 
 
+def test_cwe_tools_search_definitions_and_return_mitigation_text(sample_graph):
+    toolbox = EvidenceToolbox(sample_graph, load_predefined_graph())
+    result = toolbox.search_weaknesses("CWE-89")
+    assert result["matches"][0]["entity_id"] == "CWE-89"
+    assert toolbox.search_weaknesses("sql injection")["total_matches"] > 0
+    documentation = toolbox.knowledge_neighborhood("CWE-89", limit=50)
+    assert documentation["source_url"] == "https://cwe.mitre.org/data/definitions/89.html"
+    assert documentation["entity"]["description"]
+    assert any(
+        entity["entity_type"] == "MITIGATION" and entity["description"]
+        for entity in documentation["related_entities"]
+    )
+    assert "error" in toolbox.knowledge_neighborhood("CWE-99999999")
+    assert "error" in toolbox.search_weaknesses("")
+
+
+@pytest.mark.parametrize("planning", [False, True])
+def test_review_and_planning_specialists_receive_cwe_tools(sample_graph, monkeypatch, planning):
+    captured = {}
+
+    def capture_agent(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("deepagents.create_deep_agent", capture_agent)
+    runtime = DeepAgentsRuntime("google_genai:gemini-2.5-flash")
+    runtime._agent(
+        toolbox=EvidenceToolbox(sample_graph, runtime.vulnerability_graph),
+        response_format=SecurityReviewProposal,
+        planning=planning,
+    )
+    for specialist in captured["subagents"]:
+        names = {tool.name for tool in specialist["tools"]}
+        assert {"search_weaknesses", "knowledge_neighborhood"} <= names
+        assert "MITRE CWE" in specialist["system_prompt"]
+
+
 def test_openai_models_disable_reasoning_for_chat_completion_tools(monkeypatch):
     captured = {}
 

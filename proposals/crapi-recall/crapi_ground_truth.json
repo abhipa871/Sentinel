@@ -1,0 +1,254 @@
+[
+ {
+  "id": "C1",
+  "title": "BOLA: another user's vehicle location",
+  "owasp": "API1",
+  "files": [
+   "services/identity/src/main/java/com/crapi/controller/VehicleController.java",
+   "services/identity/src/main/java/com/crapi/service/Impl/VehicleServiceImpl.java"
+  ],
+  "cwes": [
+   "CWE-639",
+   "CWE-862",
+   "CWE-863",
+   "CWE-285"
+  ]
+ },
+ {
+  "id": "C2",
+  "title": "BOLA: other users' mechanic reports",
+  "owasp": "API1",
+  "files": [
+   "services/workshop/crapi/mechanic/views.py"
+  ],
+  "cwes": [
+   "CWE-639",
+   "CWE-862",
+   "CWE-863",
+   "CWE-285",
+   "CWE-306"
+  ]
+ },
+ {
+  "id": "C3",
+  "title": "Broken auth: OTP brute force on v2 check-otp",
+  "owasp": "API2",
+  "files": [
+   "services/identity/src/main/java/com/crapi/controller/AuthController.java",
+   "services/identity/src/main/java/com/crapi/service/Impl/OtpServiceImpl.java"
+  ],
+  "cwes": [
+   "CWE-307",
+   "CWE-799",
+   "CWE-287",
+   "CWE-770",
+   "CWE-640"
+  ]
+ },
+ {
+  "id": "C4",
+  "title": "Excessive data exposure: post author email/vehicle id",
+  "owasp": "API3",
+  "files": [
+   "services/community/api/models/post.go",
+   "services/community/api/controllers/post_controller.go",
+   "services/community/api/models/user.go"
+  ],
+  "cwes": [
+   "CWE-200",
+   "CWE-213",
+   "CWE-359"
+  ]
+ },
+ {
+  "id": "C5",
+  "title": "Excessive data exposure: video conversion_params",
+  "owasp": "API3",
+  "files": [
+   "services/identity/src/main/java/com/crapi/entity/ProfileVideo.java",
+   "services/identity/src/main/java/com/crapi/controller/ProfileController.java"
+  ],
+  "cwes": [
+   "CWE-200",
+   "CWE-213"
+  ]
+ },
+ {
+  "id": "C6",
+  "title": "Rate limiting: contact-mechanic repeat requests (L7 DoS)",
+  "owasp": "API4",
+  "files": [
+   "services/workshop/crapi/merchant/views.py"
+  ],
+  "cwes": [
+   "CWE-770",
+   "CWE-400",
+   "CWE-799"
+  ]
+ },
+ {
+  "id": "C7",
+  "title": "BFLA: admin delete video",
+  "owasp": "API5",
+  "files": [
+   "services/identity/src/main/java/com/crapi/controller/ProfileController.java"
+  ],
+  "cwes": [
+   "CWE-285",
+   "CWE-862",
+   "CWE-863",
+   "CWE-269"
+  ]
+ },
+ {
+  "id": "C8",
+  "title": "Mass assignment: order quantity/status -> free item",
+  "owasp": "API6",
+  "files": [
+   "services/workshop/crapi/shop/views.py",
+   "services/workshop/crapi/shop/serializers.py"
+  ],
+  "cwes": [
+   "CWE-915",
+   "CWE-20",
+   "CWE-841"
+  ]
+ },
+ {
+  "id": "C9",
+  "title": "Mass assignment: increase balance via returns",
+  "owasp": "API6",
+  "files": [
+   "services/workshop/crapi/shop/views.py",
+   "services/workshop/crapi/shop/serializers.py"
+  ],
+  "cwes": [
+   "CWE-915",
+   "CWE-20",
+   "CWE-841"
+  ]
+ },
+ {
+  "id": "C10",
+  "title": "Mass assignment: update internal video properties",
+  "owasp": "API6",
+  "files": [
+   "services/identity/src/main/java/com/crapi/controller/ProfileController.java",
+   "services/identity/src/main/java/com/crapi/model/VideoForm.java",
+   "services/identity/src/main/java/com/crapi/service/Impl/ProfileServiceImpl.java"
+  ],
+  "cwes": [
+   "CWE-915"
+  ]
+ },
+ {
+  "id": "C11",
+  "title": "SSRF: contact_mechanic mechanic_api URL",
+  "owasp": "API7",
+  "files": [
+   "services/workshop/crapi/merchant/views.py"
+  ],
+  "cwes": [
+   "CWE-918"
+  ]
+ },
+ {
+  "id": "C12",
+  "title": "NoSQL injection: coupon validation",
+  "owasp": "API8",
+  "files": [
+   "services/community/api/controllers/coupon_controller.go",
+   "services/community/api/models/coupon.go"
+  ],
+  "cwes": [
+   "CWE-943",
+   "CWE-74",
+   "CWE-20"
+  ]
+ },
+ {
+  "id": "C13",
+  "title": "SQL injection: apply_coupon",
+  "owasp": "API8",
+  "files": [
+   "services/workshop/crapi/shop/views.py"
+  ],
+  "cwes": [
+   "CWE-89"
+  ]
+ },
+ {
+  "id": "C14",
+  "title": "Unauthenticated endpoint: mechanic report",
+  "owasp": "API2",
+  "files": [
+   "services/workshop/crapi/mechanic/views.py"
+  ],
+  "cwes": [
+   "CWE-306",
+   "CWE-862"
+  ]
+ },
+ {
+  "id": "C15",
+  "title": "JWT forgery: alg confusion / JKU injection",
+  "owasp": "API2",
+  "files": [
+   "services/identity/src/main/java/com/crapi/config/JwtProvider.java"
+  ],
+  "cwes": [
+   "CWE-347",
+   "CWE-345",
+   "CWE-287",
+   "CWE-327",
+   "CWE-918"
+  ]
+ },
+ {
+  "id": "C16",
+  "title": "LLM prompt injection",
+  "owasp": "LLM01",
+  "files": [
+   "services/chatbot/src/chatbot/langgraph_agent.py",
+   "services/chatbot/src/chatbot/chat_api.py"
+  ],
+  "cwes": [
+   "CWE-1427",
+   "CWE-77",
+   "CWE-74"
+  ]
+ },
+ {
+  "id": "C17",
+  "title": "LLM: extract another user's credentials",
+  "owasp": "LLM06",
+  "files": [
+   "services/chatbot/src/chatbot/langgraph_agent.py",
+   "services/chatbot/src/mcpserver/server.py",
+   "services/chatbot/src/chatbot/retriever_utils.py"
+  ],
+  "cwes": [
+   "CWE-200",
+   "CWE-359",
+   "CWE-1427",
+   "CWE-862"
+  ]
+ },
+ {
+  "id": "C18",
+  "title": "LLM: act on behalf of another user",
+  "owasp": "LLM08",
+  "files": [
+   "services/chatbot/src/mcpserver/server.py",
+   "services/chatbot/src/mcpserver/auth/middleware.py",
+   "services/chatbot/src/chatbot/langgraph_agent.py"
+  ],
+  "cwes": [
+   "CWE-441",
+   "CWE-862",
+   "CWE-863",
+   "CWE-639",
+   "CWE-1427"
+  ]
+ }
+]

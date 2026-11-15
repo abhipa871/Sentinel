@@ -35,8 +35,26 @@ def evaluate_rule(asset: Asset, rule: ApplicabilityRule) -> PredicateResult:
         return PredicateResult("no_match", (), ())
     if rule.language_tags and asset.language not in rule.language_tags:
         return PredicateResult("no_match", (), ())
+    if asset.features.get("is_test") or not asset.size_bytes:
+        # Tests and empty files are not deployed attack surface (empty files previously
+        # produced "unknown" predicates and were emitted as candidates).
+        return PredicateResult("no_match", (), ())
     required = rule.required_features
     symbols = _feature_symbols(asset.features)
+    signals = set(asset.features.get("security_signals", ()))
+    signal_evidence: dict[str, list[str]] = asset.features.get("signal_evidence", {})
+    matched_signals: set[str] = set()
+    if all_of := required.get("all_signals"):
+        if not set(all_of) <= signals:
+            return PredicateResult("no_match", (), ())
+        matched_signals |= set(all_of)
+    if any_of := required.get("any_signals"):
+        found = set(any_of) & signals
+        if not found:
+            return PredicateResult("no_match", (), ())
+        matched_signals |= found
+    if set(rule.excluded_features.get("any_signals", ())) & signals:
+        return PredicateResult("no_match", (), ())
     if expected := required.get("any_api_symbols"):
         matches = {
             symbol
@@ -54,7 +72,10 @@ def evaluate_rule(asset: Asset, rule: ApplicabilityRule) -> PredicateResult:
     excluded = rule.excluded_features.get("any_api_symbols", ())
     if any(symbol in symbols for symbol in excluded):
         return PredicateResult("no_match", (), ())
-    return PredicateResult("match", asset.evidence_refs, ())
+    spans = tuple(
+        sorted({ref for name in matched_signals for ref in signal_evidence.get(name, ())})
+    )
+    return PredicateResult("match", spans or asset.evidence_refs, ())
 
 
 def _candidate_id(
@@ -186,9 +207,30 @@ class ModuleOne:
         )
         rows: list[PotentialVulnerabilityRow] = []
         rules = sorted(knowledge.rules, key=lambda item: item.rule_id)
+        java_lookups: dict[str, list[str]] = {}
+        for asset in graph.assets:
+            if asset.features.get("is_test"):
+                continue
+            for name, refs in asset.features.get("signal_evidence", {}).items():
+                if name.startswith("java_id_lookup:"):
+                    java_lookups.setdefault(name.split(":", 1)[1], []).extend(refs)
         for asset in graph.assets:
             for rule in rules:
                 predicate = evaluate_rule(asset, rule)
+                if (
+                    predicate.result == "no_match"
+                    and rule.rule_id == "rule.cwe-639.bola.v1"
+                    and not asset.features.get("is_test")
+                ):
+                    linked_refs = {
+                        ref
+                        for name, refs in asset.features.get("signal_evidence", {}).items()
+                        if name.startswith("java_client_delegate:")
+                        and (lookup := java_lookups.get(name.split(":", 1)[1]))
+                        for ref in (*refs, *lookup)
+                    }
+                    if linked_refs:
+                        predicate = PredicateResult("match", tuple(sorted(linked_refs)), ())
                 if predicate.result == "no_match":
                     continue
                 related = _context(graph, asset, depth=graph_depth)
@@ -262,7 +304,7 @@ def _selected_related(
 
 
 class AgenticModuleOne:
-    """DeepAgents-owned Module I candidate discovery with deterministic contract validation."""
+    """Merge rule-based leads and validated Deep Agents candidates."""
 
     def __init__(self, runtime: SemanticRuntime) -> None:
         if not runtime.is_deepagents:
@@ -290,7 +332,7 @@ class AgenticModuleOne:
             vulnerability_graph,
             max_candidates=max_candidates,
         )
-        return self._materialize(
+        agent_rows = self._materialize(
             output,
             leads,
             graph,
@@ -298,6 +340,23 @@ class AgenticModuleOne:
             vulnerability_graph,
             max_candidates=max_candidates,
         )
+        merged = {(row.asset_id, row.vulnerability_id): row for row in leads}
+        for row in agent_rows:
+            key = (row.asset_id, row.vulnerability_id)
+            previous = merged.get(key)
+            if previous:
+                row = previous.model_copy(
+                    update={
+                        "observed_evidence_refs": tuple(
+                            dict.fromkeys(
+                                (*previous.observed_evidence_refs, *row.observed_evidence_refs)
+                            )
+                        ),
+                        "rule_ids": tuple(sorted(set(previous.rule_ids) | set(row.rule_ids))),
+                    }
+                )
+            merged[key] = row
+        return tuple(merged.values())[:max_candidates]
 
     @staticmethod
     def _materialize(

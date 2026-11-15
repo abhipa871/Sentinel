@@ -2,6 +2,53 @@ from sentinel.contracts import ModuleOneAgentOutput, ModuleOneCandidateProposal
 from sentinel.knowledge import curated_mvp_knowledge
 from sentinel.knowledge_graph import load_predefined_graph
 from sentinel.module1 import AgenticModuleOne, ModuleOne, evaluate_rule
+from sentinel.phase0 import RepositoryExtractor
+
+
+def test_java_delegation_requires_an_unscoped_lookup_in_the_matching_service(tmp_path):
+    (tmp_path / "DocumentController.java").write_text(
+        """package example.web;
+import example.documents.DocumentService;
+class DocumentController {
+  DocumentService documents;
+  @GetMapping
+  public Document get(@PathVariable UUID id) {
+    return documents.read(id);
+  }
+  @GetMapping
+  public Document scoped(@PathVariable UUID id) {
+    return documents.readOwned(id);
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "DocumentServiceImpl.java").write_text(
+        """package example.documents;
+class DocumentServiceImpl implements DocumentService {
+  public Document read(UUID id) {
+    return repository.findById(id);
+  }
+  public Document readOwned(UUID id) {
+    return repository.findByIdAndOwner(id, principal());
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    graph = RepositoryExtractor().extract(tmp_path)
+    (candidate,) = [
+        row
+        for row in ModuleOne().run(graph, curated_mvp_knowledge())
+        if row.vulnerability_id == "CWE-639"
+    ]
+    refs = set(candidate.observed_evidence_refs)
+    assert {
+        (item.source_path, item.start_line) for item in graph.evidence if item.evidence_id in refs
+    } == {
+        ("DocumentController.java", 7),
+        ("DocumentServiceImpl.java", 4),
+    }
 
 
 def test_module_one_emits_potential_candidates_only(sample_graph):
@@ -68,3 +115,15 @@ def test_agent_selects_final_module_one_candidates(sample_graph):
     assert rows[0].derivation_kind == "agent_inference"
     assert rows[0].candidate_status == "potential"
     assert "agent.module1.discovery.v1" in rows[0].rule_ids
+
+    class FixtureRuntime:
+        is_deepagents = True
+
+        def discover_candidates(self, *_args, **_kwargs):
+            return output
+
+    merged = AgenticModuleOne(FixtureRuntime()).run(sample_graph, knowledge, graph)
+    assert {row.candidate_id for row in merged} == {row.candidate_id for row in leads}
+    retained = next(row for row in merged if row.candidate_id == lead.candidate_id)
+    assert set(lead.observed_evidence_refs) <= set(retained.observed_evidence_refs)
+    assert "agent.module1.discovery.v1" in retained.rule_ids
